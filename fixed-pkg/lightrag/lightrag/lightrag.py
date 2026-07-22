@@ -2153,8 +2153,10 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
         # 1. Get all chunk IDs for this document
         chunk_ids = []
         doc_status = await self.doc_status.get_by_id(doc_id)
-        if doc_status and doc_status.chunks_list:
-            chunk_ids = [cid for cid in doc_status.chunks_list if cid]
+        if doc_status:
+            cl = doc_status.get("chunks_list") if isinstance(doc_status, dict) else getattr(doc_status, "chunks_list", None)
+            if cl:
+                chunk_ids = [cid for cid in cl if cid]
 
         if not chunk_ids:
             return {"synced": 0, "fields": [], "message": "No chunks found"}
@@ -2162,12 +2164,14 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
         # 2. Fetch chunks from Milvus (including $meta dynamic fields)
         id_list = '", "'.join(chunk_ids)
         try:
+            self.chunks_vdb._ensure_collection_loaded()
             rows = self.chunks_vdb._client.query(
                 collection_name=self.chunks_vdb.final_namespace,
                 filter=f'id in ["{id_list}"]',
                 output_fields=["*"],
             )
         except Exception:
+            _log.warning("Failed to query Milvus for doc_id=%s", doc_id, exc_info=True)
             rows = []
         if not rows:
             return {"synced": 0, "fields": [], "message": "Milvus query returned no rows"}
