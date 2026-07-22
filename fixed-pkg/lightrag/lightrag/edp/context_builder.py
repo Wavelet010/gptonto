@@ -39,11 +39,22 @@ def build_embedding_text(
         return chunk.get("content", "")
 
     # --- compact mode: metadata-only ---
-    # compact_fields fully controls the content; include_doc_title is ignored
-    # (add "title" to compact_fields if you want the document title included).
+    # compact_fields defines the metadata values; doc_title and
+    # heading_breadcrumb are optionally prepended when configured
+    # AND not already listed in compact_fields (avoid duplication).
     # If summary (LLM-generated) is missing, degrade to rich mode.
     if config.mode == "compact":
         parts: list[str] = []
+        compact_set = set(config.compact_fields)
+        # Prepend doc_title when configured and not already a compact field
+        if config.include_doc_title and doc_title and "title" not in compact_set:
+            parts.append(doc_title)
+        # Prepend heading_path when configured and not already a compact field
+        if config.include_heading_path and "heading_path" not in compact_set:
+            breadcrumb = chunk.get("heading_breadcrumb", "")
+            if breadcrumb:
+                parts.append(breadcrumb)
+        # Append compact_fields values
         for field_name in config.compact_fields:
             val = chunk.get(field_name)
             if field_name == "summary" and (not val or val == ""):

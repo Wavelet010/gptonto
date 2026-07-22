@@ -22,11 +22,11 @@ heading_levels: {}
 
 context_builder:
   enabled: true
-  mode: rich                # rich | compact | raw
+  mode: compact                # rich | compact | raw
   compact_fields:             # compact 模式用哪些字段拼 embedding_text
-    - heading_path
-    - knowledge_type
-    - doc_type
+    #- heading_path
+      #- knowledge_type
+      #- doc_type
     - summary
     # - keywords
     # - target
