@@ -532,8 +532,8 @@ try:
           f"names={field_names}")
     check("D1h: title has auto_file_name=True",
           all(f.auto_file_name for f in mb_config_general.filename_fields if f.name == "title"))
-    check("D1i: entity_type has depends_on='entity_name'",
-          all(f.depends_on == "entity_name"
+    check("D1i: entity_type has no depends_on (matches filename directly)",
+          all(f.depends_on is None
               for f in mb_config_general.filename_fields if f.name == "entity_type"))
     # Verify rules on specific fields
     for f in mb_config_general.filename_fields:
