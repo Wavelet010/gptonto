@@ -92,7 +92,7 @@ metadata_builder:
     #   rule_pattern: "\\d+(\\.\\d+)?\\s*(°|E|N|MHz|GHz|dB|km|nm|架|艘|次)"
 
   filename_fields:
-  # 村粗原始文件名（五扩展名）到title字段
+  # 存储原始文件名（无扩展名）到title字段
     - name: title
       source: filename
       type: string
@@ -147,15 +147,14 @@ metadata_builder:
     - name: entity_type
       source: filename
       type: string
-      description: "实体类型，根据entity_name映射"
-      depends_on: entity_name
+      description: "实体类型（从文件名分类）"
       rules:
         - pattern: "雷达"
           value: "雷达"
           priority: 10
         - pattern: "通信|话音"
           value: "通信"
-          priority: 10 
+          priority: 10
 
   manual_fields:
     # - name: doc_type

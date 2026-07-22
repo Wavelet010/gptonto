@@ -119,20 +119,21 @@ class MetadataBuilder:
         """Extract heading-derived fields from the chunk."""
         meta: dict[str, Any] = {}
         for field in self.config.heading_fields:
+            key = field.output_key or field.name
             if field.name == "heading_path":
-                meta[field.name] = chunk.get("heading_breadcrumb", "")
+                meta[key] = chunk.get("heading_breadcrumb", "")
             elif field.name == "section_depth":
-                meta[field.name] = chunk.get("level", 0)
+                meta[key] = chunk.get("level", 0)
             elif field.name == "knowledge_type":
                 parents = chunk.get("parent_headings", [])
                 if parents:
-                    meta[field.name] = parents[0]
+                    meta[key] = parents[0]
                 else:
-                    meta[field.name] = chunk.get("heading", "")
+                    meta[key] = chunk.get("heading", "")
             elif field.name in ("section_id", "parent_section_id"):
-                meta[field.name] = chunk.get(field.name, "")
+                meta[key] = chunk.get(field.name, "")
             else:
-                meta[field.name] = chunk.get(field.name, "")
+                meta[key] = chunk.get(field.name, "")
         return meta
 
     # ------------------------------------------------------------------
@@ -186,10 +187,17 @@ class MetadataBuilder:
 def _topo_sort_fields(
     fields: list[FilenameFieldConfig],
 ) -> list[FilenameFieldConfig]:
-    """Topological sort: no-dep fields first, depends_on fields after."""
+    """Topological sort: no-dep fields first, depends_on fields after.
+
+    Resolves dependencies by ``output_key or name`` to match the storage
+    key used during extraction.
+    """
     ordered: list[FilenameFieldConfig] = []
     resolved: set[str] = set()
     remaining = list(fields)
+
+    def _key(f: FilenameFieldConfig) -> str:
+        return f.output_key or f.name
 
     while remaining:
         progress = False
@@ -197,7 +205,7 @@ def _topo_sort_fields(
             if not f.depends_on or f.depends_on in resolved:
                 ordered.append(f)
                 remaining.remove(f)
-                resolved.add(f.name)
+                resolved.add(_key(f))
                 progress = True
         if not progress:
             ordered.extend(remaining)
@@ -279,9 +287,12 @@ async def _extract_document_llm(
     import json as _json
 
     prompts = []
+    prompt_keys: dict[str, str] = {}  # prompt key → output key
     for f in fields:
         if f.llm_prompt:
-            prompts.append(f"- {f.name}: {f.llm_prompt}")
+            key = f.output_key or f.name
+            prompts.append(f"- {key}: {f.llm_prompt}")
+            prompt_keys[key] = key
     if not prompts:
         return
 
@@ -299,7 +310,10 @@ async def _extract_document_llm(
     )
     try:
         result = await _llm_call(rag, sys_msg, user_msg)
-        doc_meta = _json.loads(_extract_json(result))
+        raw = _extract_json(result)
+        if not raw:
+            raise ValueError("empty LLM response")
+        doc_meta = _json.loads(raw)
         if isinstance(doc_meta, dict):
             for ch in chunks:
                 ch.setdefault("_edp_meta", {}).update(doc_meta)
@@ -328,7 +342,9 @@ async def _extract_chunk_llm(
     if not field_specs:
         return
 
-    prompts = [f"- {f.name}: {f.llm_prompt}" for f in field_specs]
+    prompts = [
+        f"- {f.output_key or f.name}: {f.llm_prompt}" for f in field_specs
+    ]
     sys_msg = (
         "You are a metadata extraction assistant. For each chunk, extract "
         "the requested fields. Return a JSON array: "

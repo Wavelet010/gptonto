@@ -2429,9 +2429,10 @@ class _PipelineMixin:
                                         )
 
                             # --- Unified metadata extraction ---
+                            # filename metadata is already cached inside
+                            # heading_mb._doc_metadata via extract_filename_metadata
                             await heading_mb.apply_to_chunks(
                                 chunking_result, self, content,
-                                extra_doc_meta=fn_meta,
                             )
 
                             # --- Serialize: JSON string (backward compat) + flat
