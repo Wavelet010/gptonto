@@ -245,20 +245,25 @@ async def _edp_llm_metadata(
             except Exception:
                 logger.warning("EDP document-level LLM extraction failed — title/equipment will be missing", exc_info=True)
 
-    # --- Chunk-level extraction (batched) ---
+    # --- Chunk-level extraction (batched, with retry and graceful degradation) ---
     if mb_config.llm_fields:
         field_specs = []
         for f in mb_config.llm_fields:
             if f.llm_prompt:
                 field_specs.append(f)
         if field_specs:
-            # Build one prompt listing all chunks.
-            chunk_blocks = []
-            for i, ch in enumerate(chunks):
-                chunk_blocks.append(
-                    f"[Chunk {i}]\n{ch.get('content', '')[:2000]}\n"
+            import json as _json
+
+            def _extract_json(text: str) -> str:
+                """Strip markdown code fences from LLM JSON responses."""
+                import re
+                m = re.search(
+                    r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL
                 )
-            combined = "\n".join(chunk_blocks)
+                if m:
+                    return m.group(1).strip()
+                return text.strip()
+
             prompts = [f"- {f.name}: {f.llm_prompt}" for f in field_specs]
             sys_msg = (
                 "You are a metadata extraction assistant. For each chunk, extract "
@@ -266,32 +271,70 @@ async def _edp_llm_metadata(
                 '[{"chunk":0,"field1":"value1",...},...]. '
                 "Return ONLY the JSON, no explanation."
             )
-            user_msg = (
-                f"Chunks:\n{combined}\n\n"
-                "Extract these fields for EACH chunk:\n"
-                + "\n".join(prompts)
-                + "\n\nReturn as JSON array:"
-            )
-            try:
-                result = await _edp_llm_call(rag, sys_msg, user_msg)
-                import json as _json
-                arr = _json.loads(result) if isinstance(result, str) else result
+
+            # Split into sub-batches so a single failure doesn't lose everything.
+            BATCH_SIZE = 5
+            extracted = 0
+            for batch_start in range(0, len(chunks), BATCH_SIZE):
+                batch_chunks = chunks[batch_start:batch_start + BATCH_SIZE]
+                # Build prompt for this sub-batch
+                blocks = []
+                for offset, ch in enumerate(batch_chunks):
+                    blocks.append(
+                        f"[Chunk {batch_start + offset}]"
+                        f"\n{ch.get('content', '')[:2000]}\n"
+                    )
+                user_msg = (
+                    f"Chunks:\n{''.join(blocks)}\n"
+                    "Extract these fields for EACH chunk:\n"
+                    + "\n".join(prompts)
+                    + "\n\nReturn as JSON array:"
+                )
+
+                # Try up to 2 attempts (LLM may return empty response transiently)
+                arr: list | None = None
+                for attempt in range(2):
+                    try:
+                        result = await _edp_llm_call(rag, sys_msg, user_msg)
+                        raw = _extract_json(
+                            result if isinstance(result, str) else str(result)
+                        )
+                        if not raw:
+                            continue  # empty response → retry
+                        arr = _json.loads(raw)
+                        break
+                    except Exception:
+                        if attempt == 0:
+                            continue  # retry once more
+                        arr = None
+
                 if isinstance(arr, list):
                     for item in arr:
-                        idx = item.get("chunk", -1)
-                        if 0 <= idx < len(chunks):
+                        local_idx = item.get("chunk", -1)
+                        global_idx = batch_start + local_idx
+                        if 0 <= local_idx < len(batch_chunks):
                             item.pop("chunk", None)
-                            chunks[idx].setdefault("_edp_meta", {}).update(item)
-                    logger.info(
-                        "EDP chunk-level metadata extracted for %d chunks",
-                        len(arr),
+                            chunks[global_idx].setdefault(
+                                "_edp_meta", {}
+                            ).update(item)
+                            extracted += 1
+                else:
+                    logger.warning(
+                        "EDP chunk-level batch [%d:%d] failed after retries",
+                        batch_start,
+                        batch_start + len(batch_chunks),
                     )
-            except Exception:
+
+            if extracted:
+                logger.info(
+                    "EDP chunk-level metadata extracted for %d/%d chunks",
+                    extracted, len(chunks),
+                )
+            else:
                 logger.warning(
                     "EDP chunk-level LLM metadata extraction failed — "
                     "summary/keywords will use fallback values. "
-                    "Check LLM_BINDING configuration or LLM response format.",
-                    exc_info=True,
+                    "Check LLM_BINDING configuration or LLM response format."
                 )
 
 
