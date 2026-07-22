@@ -4191,4 +4191,27 @@ def create_document_routes(
         pm = ProfileManager(custom_dirs=custom_dirs if custom_dirs else None)
         return pm.list_profiles()
 
+    @router.post("/sync-metadata/{doc_id}")
+    async def sync_metadata(
+        doc_id: str,
+        request: Request,
+    ):
+        """Sync chunk metadata from Milvus back to the JSON KV store.
+
+        After manual edits via Attu or the Milvus API, this endpoint writes
+        the dynamic fields ($meta) back to the JSON text_chunks storage so
+        they survive backup, migration, and graph rebuild.
+        """
+        rag = get_rag(request)
+        result = await rag.sync_metadata_from_vdb(doc_id)
+        synced = result.get("synced", 0)
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        return {
+            "status": "success",
+            "message": f"Synced {synced} chunk(s)" if synced
+                       else result.get("message", "No changes"),
+            "data": result,
+        }
+
     return router

@@ -2132,6 +2132,90 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
             owning_loop=self._owning_loop,
         )
 
+    async def sync_metadata_from_vdb(self, doc_id: str) -> dict[str, Any]:
+        """Sync per-chunk metadata from the vector DB (Milvus) back to JSON KV store.
+
+        Useful after manual edits via Attu / Milvus API — writes dynamic
+        fields ($meta) from the vector DB into ``text_chunks`` so they
+        survive backup / migration / graph rebuild.
+
+        Returns a dict with ``synced`` (count of updated chunks) and
+        ``fields`` (list of field names synced).
+        """
+        import logging
+        _log = logging.getLogger(__name__)
+        from lightrag.kg.milvus_impl import MilvusVectorDBStorage
+
+        # Only works for Milvus backend
+        if not isinstance(self.chunks_vdb, MilvusVectorDBStorage):
+            return {"error": "sync_metadata_from_vdb requires Milvus backend"}
+
+        # 1. Get all chunk IDs for this document
+        chunk_ids = []
+        doc_status = await self.doc_status.get_by_id(doc_id)
+        if doc_status and doc_status.chunks_list:
+            chunk_ids = [cid for cid in doc_status.chunks_list if cid]
+
+        if not chunk_ids:
+            return {"synced": 0, "fields": [], "message": "No chunks found"}
+
+        # 2. Fetch chunks from Milvus (including $meta dynamic fields)
+        id_list = '", "'.join(chunk_ids)
+        try:
+            rows = self.chunks_vdb._client.query(
+                collection_name=self.chunks_vdb.final_namespace,
+                filter=f'id in ["{id_list}"]',
+                output_fields=["*"],
+            )
+        except Exception:
+            rows = []
+        if not rows:
+            return {"synced": 0, "fields": [], "message": "Milvus query returned no rows"}
+
+        # Build id→row map
+        row_map = {r["id"]: r for r in rows}
+
+        # 3. Collect all metadata field names (dynamic fields only)
+        reserved = {"id", "vector", "full_doc_id", "content",
+                     "file_path", "created_at", "distance", "metadata"}
+        all_fields: set[str] = set()
+        for r in rows:
+            for k in r:
+                if k not in reserved:
+                    all_fields.add(k)
+
+        if not all_fields:
+            return {"synced": 0, "fields": [], "message": "No dynamic metadata fields found"}
+
+        # 4. Update JSON KV store for each chunk
+        synced = 0
+        for cid in chunk_ids:
+            row = row_map.get(cid)
+            if not row:
+                continue
+            current = await self.text_chunks.get_by_id(cid)
+            if not current:
+                continue
+            changed = False
+            for field in all_fields:
+                val = row.get(field)
+                if val is not None and current.get(field) != val:
+                    current[field] = val
+                    changed = True
+            if changed:
+                await self.text_chunks.upsert({cid: current})
+                synced += 1
+
+        _log.info(
+            "Synced metadata for %d/%d chunks of %s, fields=%s",
+            synced, len(chunk_ids), doc_id, sorted(all_fields),
+        )
+        return {
+            "synced": synced,
+            "total_chunks": len(chunk_ids),
+            "fields": sorted(all_fields),
+        }
+
     async def aquery_data(
         self,
         query: str,
