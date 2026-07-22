@@ -277,36 +277,37 @@ async def _edp_llm_metadata(
             extracted = 0
             for batch_start in range(0, len(chunks), BATCH_SIZE):
                 batch_chunks = chunks[batch_start:batch_start + BATCH_SIZE]
-                # Build prompt for this sub-batch
-                blocks = []
-                for offset, ch in enumerate(batch_chunks):
-                    blocks.append(
-                        f"[Chunk {batch_start + offset}]"
-                        f"\n{ch.get('content', '')[:2000]}\n"
-                    )
-                user_msg = (
-                    f"Chunks:\n{''.join(blocks)}\n"
-                    "Extract these fields for EACH chunk:\n"
-                    + "\n".join(prompts)
-                    + "\n\nReturn as JSON array:"
-                )
 
-                # Try up to 2 attempts (LLM may return empty response transiently)
+                # ---- Try batch extraction first ----
                 arr: list | None = None
                 for attempt in range(2):
                     try:
+                        blocks = []
+                        for offset, ch in enumerate(batch_chunks):
+                            blocks.append(
+                                f"[Chunk {batch_start + offset}]"
+                                f"\n{ch.get('content', '')[:2000]}\n"
+                            )
+                        user_msg = (
+                            f"Chunks:\n{''.join(blocks)}\n"
+                            "Extract these fields for EACH chunk:\n"
+                            + "\n".join(prompts)
+                            + "\n\nReturn as JSON array:"
+                        )
                         result = await _edp_llm_call(rag, sys_msg, user_msg)
                         raw = _extract_json(
                             result if isinstance(result, str) else str(result)
                         )
                         if not raw:
-                            continue  # empty response → retry
+                            continue
                         arr = _json.loads(raw)
-                        break
+                        if isinstance(arr, list) and len(arr) > 0:
+                            break  # got a non-empty list
+                        arr = None  # empty list → treat as failure, retry
                     except Exception:
-                        if attempt == 0:
-                            continue  # retry once more
                         arr = None
+                        if attempt < 1:
+                            continue
 
                 if isinstance(arr, list):
                     for item in arr:
@@ -318,12 +319,43 @@ async def _edp_llm_metadata(
                                 "_edp_meta", {}
                             ).update(item)
                             extracted += 1
-                else:
-                    logger.warning(
-                        "EDP chunk-level batch [%d:%d] failed after retries",
-                        batch_start,
-                        batch_start + len(batch_chunks),
-                    )
+                    continue  # batch succeeded
+
+                # ---- Batch failed → fall back to per-chunk extraction ----
+                logger.warning(
+                    "EDP chunk-level batch [%d:%d] failed — "
+                    "falling back to per-chunk extraction",
+                    batch_start, batch_start + len(batch_chunks),
+                )
+                for offset, ch in enumerate(batch_chunks):
+                    global_idx = batch_start + offset
+                    try:
+                        user_msg = (
+                            f"Chunk:\n{ch.get('content', '')[:3000]}\n\n"
+                            "Extract these fields for this chunk:\n"
+                            + "\n".join(prompts)
+                            + "\n\nReturn as JSON object:"
+                        )
+                        # Adapt system prompt for single-chunk mode
+                        single_sys = (
+                            "You are a metadata extraction assistant. "
+                            "Extract the requested fields from the chunk. "
+                            "Return a JSON object with field names as keys. "
+                            "Return ONLY the JSON, no explanation."
+                        )
+                        result = await _edp_llm_call(rag, single_sys, user_msg)
+                        raw = _extract_json(
+                            result if isinstance(result, str) else str(result)
+                        )
+                        if raw:
+                            obj = _json.loads(raw)
+                            if isinstance(obj, dict):
+                                chunks[global_idx].setdefault(
+                                    "_edp_meta", {}
+                                ).update(obj)
+                                extracted += 1
+                    except Exception:
+                        pass  # individual chunk failed → skip, others continue
 
             if extracted:
                 logger.info(
