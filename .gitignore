@@ -1,0 +1,22 @@
+# Data directories (persistent runtime data — do not track)
+fixed-pkg/data/
+
+# Docker images (large binaries)
+fixed-pkg/images/*.tar
+
+# Archive files
+*.tar.gz
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+
+# IDE / editor
+.vscode/
+.idea/
+
+# Claude
+.claude/plans/

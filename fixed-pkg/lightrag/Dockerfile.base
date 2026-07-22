@@ -1,0 +1,67 @@
+# LightRAG-EDP 基础镜像 (ARM64)
+# 包含: Python 环境 + 依赖包 + 前端静态文件
+# 源码通过 docker-compose volume 挂载，更新代码只需 rsync + 重启
+#
+# 构建: docker buildx build -f Dockerfile.base --platform linux/arm64 --tag lightrag-base:latest --load .
+
+# ---- 前端构建阶段 ----
+FROM --platform=$BUILDPLATFORM oven/bun:1 AS frontend-builder
+WORKDIR /app
+COPY lightrag_webui/ ./lightrag_webui/
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    cd lightrag_webui && bun install --frozen-lockfile && bun run build
+
+# ---- Python + 系统依赖 ----
+FROM python:3.12-slim-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        curl build-essential pkg-config gosu \
+    && rm -rf /var/lib/apt/lists/*
+
+# Rust (某些包编译需要)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /app
+
+# uv 包管理器
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+ENV UV_SYSTEM_PYTHON=1
+
+# 只复制依赖文件，安装 Python 包
+COPY pyproject.toml setup.py uv.lock ./
+RUN --mount=type=cache,target=/root/.local/share/uv \
+    uv sync --frozen --no-dev --extra api --extra offline --no-editable \
+    && .venv/bin/python -m ensurepip --upgrade
+
+# 前端静态文件
+COPY --from=frontend-builder /app/lightrag/api/webui /app/lightrag/api/webui
+
+# 创建源码占位目录（运行时 volume 挂载覆盖）
+RUN mkdir -p /app/lightrag/edp /app/lightrag/api \
+    && mkdir -p /app/data/rag_storage /app/data/inputs /app/data/prompts /app/data/tiktoken
+
+# 非 root 用户
+RUN groupadd -g 1000 lightrag \
+    && useradd -u 1000 -g lightrag -m -d /home/lightrag -s /usr/sbin/nologin lightrag \
+    && chown -R lightrag:lightrag /app /home/lightrag
+
+ENV HOME=/home/lightrag \
+    XDG_CACHE_HOME=/home/lightrag/.cache \
+    PIP_CACHE_DIR=/home/lightrag/.cache/pip \
+    UV_CACHE_DIR=/home/lightrag/.cache/uv \
+    TIKTOKEN_CACHE_DIR=/app/data/tiktoken \
+    WORKING_DIR=/app/data/rag_storage \
+    INPUT_DIR=/app/data/inputs \
+    PROMPT_DIR=/app/data/prompts \
+    PATH=/app/.venv/bin:/root/.local/bin:$PATH
+
+EXPOSE 9621
+
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["python", "-m", "lightrag.api.lightrag_server"]

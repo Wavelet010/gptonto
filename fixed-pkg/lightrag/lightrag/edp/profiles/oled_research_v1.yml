@@ -1,0 +1,86 @@
+profile_name: oled_research_v1
+
+# Override heading levels per pattern.
+heading_levels: {}
+  # chinese_h1: 1
+  # chinese_h2_full: 2
+  # decimal_base: 1
+
+context_builder:
+  enabled: true
+  mode: rich
+  # compact_fields:
+  #   - heading_path
+  #   - knowledge_type
+  #   - keywords
+  #   - summary
+  include_doc_title: true
+  include_heading_path: true
+  sep: " | "
+
+metadata_builder:
+  document_fields:
+    - name: material
+      source: document
+      type: string
+      description: "材料标识（如 GD1265）"
+      llm_prompt: "从本文档中提取主要材料标识或编号，返回简短字符串。"
+
+    - name: customer
+      source: document
+      type: string
+      description: "客户或合作方名称"
+      llm_prompt: "从本文档中提取客户或合作方名称。"
+
+    - name: project
+      source: document
+      type: string
+      description: "项目名称或代号"
+      llm_prompt: "从本文档中提取项目名称或代号。"
+
+  heading_fields:
+    - name: heading_path
+      source: heading
+      type: string
+      description: "完整标题面包屑路径"
+
+    - name: section_depth
+      source: heading
+      type: number
+      description: "标题层级深度"
+
+    - name: knowledge_type
+      source: heading
+      type: string
+      description: "知识类型（如 实验结果、理论分析），从顶层标题推断"
+
+  llm_fields:
+    - name: keywords
+      source: llm
+      type: text
+      description: "关键技术术语"
+      llm_prompt: "从此文本片段中提取 3-5 个关键技术术语或关键词，返回 JSON 字符串数组。"
+
+    - name: summary
+      source: llm
+      type: text
+      description: "一句话摘要"
+      llm_prompt: "用一句话总结此文本片段的关键信息。"
+
+  rule_fields:
+    - name: has_numeric_data
+      source: rule
+      type: boolean
+      description: "是否包含数值测量数据"
+      rule_pattern: "\\d+(\\.\\d+)?\\s*(%|nm|cd/m²|lm/W|V|mA|℃|K)"
+
+  manual_fields:
+    - name: doc_type
+      source: manual
+      type: string
+      description: "文档类型"
+
+    - name: reviewed
+      source: manual
+      type: boolean
+      description: "是否已审核"
