@@ -4263,38 +4263,6 @@ async def extract_keywords_only(
     return hl_keywords, ll_keywords
 
 
-def _match_filter(metadata: dict, filt: dict) -> bool:
-    """Check if *metadata* dict matches JSON filter conditions."""
-    if not filt or not metadata:
-        return True  # Empty filter matches everything
-    for field, value in filt.items():
-        actual = metadata.get(field)
-        if actual is None:
-            return False
-        if isinstance(value, list):
-            if actual not in value and str(actual) not in [str(v) for v in value]:
-                return False
-        elif isinstance(value, dict):
-            # Range filter
-            for op, val in value.items():
-                try:
-                    av = float(actual)
-                    cv = float(val)
-                except (ValueError, TypeError):
-                    return False
-                if op == "gte" and av < cv:
-                    return False
-                if op == "lte" and av > cv:
-                    return False
-                if op == "gt" and av <= cv:
-                    return False
-                if op == "lt" and av >= cv:
-                    return False
-        else:
-            if str(actual) != str(value):
-                return False
-    return True
-
 
 async def _get_vector_context(
     query: str,
@@ -4322,45 +4290,35 @@ async def _get_vector_context(
         search_top_k = query_param.chunk_top_k or query_param.top_k
         cosine_threshold = chunks_vdb.cosine_better_than_threshold
 
-        # EDP metadata filter — fetch extra results then filter in memory
-        # (works for all backends including NanoVectorDB).
+        # EDP metadata filter — translated to Milvus native scalar expression.
         metadata_filter = getattr(query_param, "metadata_filter", None)
         filter_mode = getattr(query_param, "filter_mode", "soft")
 
-        # Fetch more than top_k to allow post-filter headroom.
-        fetch_top_k = search_top_k * 3 if metadata_filter else search_top_k
-        raw_results = await chunks_vdb.query(
-            query,
-            top_k=fetch_top_k,
-            query_embedding=query_embedding,
-        )
-
+        filter_expr: str | None = None
         if metadata_filter:
             from lightrag.edp.filter_builder import FilterBuilder
-            parsed = FilterBuilder.parse(metadata_filter)
+            parsed = FilterBuilder.parse(metadata_filter, meta_prefix=True)
             if not parsed.is_empty:
-                import json as _json
-                matched = []
-                unmatched = []
-                for r in raw_results:
-                    meta_str = r.get("metadata", "")
-                    if meta_str:
-                        try:
-                            meta = _json.loads(meta_str) if isinstance(meta_str, str) else meta_str
-                        except Exception:
-                            meta = {}
-                    else:
-                        meta = {}
-                    if _match_filter(meta, metadata_filter if isinstance(metadata_filter, dict) else {}):
-                        matched.append(r)
-                    else:
-                        unmatched.append(r)
+                filter_expr = parsed.expr
 
-                if filter_mode == "strict":
-                    raw_results = matched
-                else:
-                    # Soft: matched first, then fill with unmatched.
-                    raw_results = matched + unmatched
+        raw_results = await chunks_vdb.query(
+            query,
+            top_k=search_top_k,
+            query_embedding=query_embedding,
+            filter_expr=filter_expr or None,
+        )
+
+        # Soft fallback: if filter returned nothing, try without filter.
+        if filter_mode == "soft" and filter_expr and not raw_results:
+            logger.info(
+                "Metadata filter returned 0 results, falling back to unfiltered query"
+            )
+            raw_results = await chunks_vdb.query(
+                query,
+                top_k=search_top_k,
+                query_embedding=query_embedding,
+            )
+
         results = raw_results[:search_top_k]
         if not results:
             logger.info(
