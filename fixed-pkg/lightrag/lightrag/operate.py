@@ -4300,10 +4300,6 @@ async def _get_vector_context(
             parsed = FilterBuilder.parse(metadata_filter, meta_prefix=True)
             if not parsed.is_empty:
                 filter_expr = parsed.expr
-        logger.info(
-            "DEBUG _get_vector_context: mf=%s mode=%s expr=%s",
-            metadata_filter, filter_mode, filter_expr,
-        )
 
         raw_results = await chunks_vdb.query(
             query,
