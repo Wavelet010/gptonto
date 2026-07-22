@@ -283,9 +283,9 @@ async def _edp_llm_metadata(
                 for attempt in range(2):
                     try:
                         blocks = []
-                        for offset, ch in enumerate(batch_chunks):
+                        for local_i, ch in enumerate(batch_chunks):
                             blocks.append(
-                                f"[Chunk {batch_start + offset}]"
+                                f"[Chunk {local_i}]"
                                 f"\n{ch.get('content', '')[:2000]}\n"
                             )
                         user_msg = (
