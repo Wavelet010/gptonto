@@ -4301,14 +4301,21 @@ async def _get_vector_context(
             if not parsed.is_empty:
                 filter_expr = parsed.expr
 
-        raw_results = await chunks_vdb.query(
-            query,
-            top_k=search_top_k,
-            query_embedding=query_embedding,
-            filter_expr=filter_expr or None,
-        )
+        try:
+            raw_results = await chunks_vdb.query(
+                query,
+                top_k=search_top_k,
+                query_embedding=query_embedding,
+                filter_expr=filter_expr or None,
+            )
+        except Exception:
+            logger.warning(
+                "Metadata filter query failed (expr=%s), falling back to unfiltered",
+                filter_expr, exc_info=True,
+            )
+            raw_results = []
 
-        # Soft fallback: if filter returned nothing, try without filter.
+        # Soft fallback: if filter returned nothing (or failed), try without filter.
         if filter_mode == "soft" and filter_expr and not raw_results:
             logger.info(
                 "Metadata filter returned 0 results, falling back to unfiltered query"

@@ -142,7 +142,7 @@ class QueryRequest(BaseModel):
         # Use Pydantic's `.model_dump(exclude_none=True)` to remove None values automatically
         # Exclude API-level parameters that don't belong in QueryParam
         request_data = self.model_dump(
-            exclude_none=True, exclude={"query", "include_chunk_content", "filter_mode"}
+            exclude_none=True, exclude={"query", "include_chunk_content"}
         )
 
         # Ensure `mode` and `stream` are set explicitly

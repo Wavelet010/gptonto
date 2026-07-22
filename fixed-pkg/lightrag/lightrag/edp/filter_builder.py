@@ -23,8 +23,7 @@ class FilterResult:
 # Fields that live in the Milvus schema (not inside $meta).
 # When meta_prefix is True, every OTHER field is wrapped as $meta["field"].
 _RESERVED_FIELDS: frozenset[str] = frozenset({
-    "id", "vector", "full_doc_id", "content", "file_path",
-    "metadata", "distance", "created_at", "chunk_id", "source_type",
+    "id", "vector", "full_doc_id", "content", "file_path", "created_at",
 })
 
 
@@ -168,8 +167,10 @@ class FilterBuilder:
         if isinstance(value, (int, float)):
             return str(value)
         s = str(value)
-        # Escape internal double quotes.
+        # Escape backslash, double-quote, and control characters.
+        s = s.replace("\\", "\\\\")
         s = s.replace('"', '\\"')
+        s = s.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
         return f'"{s}"'
 
     @staticmethod
@@ -182,6 +183,6 @@ class FilterBuilder:
     def _escape_like(value: Any) -> str:
         """Escape special chars in a LIKE pattern."""
         s = str(value)
-        for ch in ["%", "_", "\\"]:
+        for ch in ["\\", "%", "_"]:
             s = s.replace(ch, "\\" + ch)
         return s
