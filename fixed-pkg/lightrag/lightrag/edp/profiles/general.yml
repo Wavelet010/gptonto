@@ -1,0 +1,169 @@
+profile_name: general
+
+# Override heading levels per pattern.
+# Tags: chinese_h1, chinese_h2_full, chinese_h2_half, chapter_section, decimal_base
+# decimal_base = level of "1."; "1.1" = base+1, "1.1.1" = base+2.
+# Example: （一）is L2, 1. is L1:
+#   heading_levels:
+#     chinese_h2_full: 2
+#     decimal_base: 1
+heading_levels: {}
+  # chinese_h1: 1
+  # chinese_h2_full: 2
+  # decimal_base: 1
+  
+# Tag	标题	默认 Level
+# chinese_h1	一、	1
+# chinese_h2_full	（一）	2
+# chinese_h2_half	(1)	2
+# chapter_section	第一章	1
+# decimal_base	1. 的级别	3（1.1=4, 1.1.1=5）
+
+
+context_builder:
+  enabled: true
+  mode: compact                # rich | compact | raw
+  compact_fields:             # compact 模式用哪些字段拼 embedding_text
+    # - heading_path
+    # - knowledge_type
+    # - doc_type
+    - summary
+    # - keywords
+    # - target
+    # - equipment
+  include_doc_title: true
+  include_heading_path: true
+  sep: " | "
+
+metadata_builder:
+  document_fields: []
+    # - name: target
+    #   source: document
+    #   type: string
+    #   description: "敌方关键目标型号（如 P-8A、RC-135V）"
+    #   llm_prompt: "从本文档中提取敌方关键目标型号（例如 P-8A、RC-135V、EA-18G 等），以逗号分隔返回。"
+
+    # - name: equipment
+    #   source: document
+    #   type: string
+    #   description: "我方装备型号"
+    #   llm_prompt: "从本文档中提取我方关键装备型号，以逗号分隔返回。"
+
+    # - name: title
+    #   source: document
+    #   type: string
+    #   description: "文档标题"
+    #   llm_prompt: "提取本文档的标题。"
+
+  heading_fields:
+    - name: heading_path
+      source: heading
+      type: string
+      description: "完整标题面包屑路径"
+
+    - name: section_depth
+      source: heading
+      type: number
+      description: "标题层级深度"
+
+    - name: knowledge_type
+      source: heading
+      type: string
+      description: "知识类型（如 基本情况、态势分析、装备动态），从顶层标题推断"
+
+  llm_fields:
+    # - name: keywords
+    #   source: llm
+    #   type: text
+    #   description: "关键技术关键词"
+    #   llm_prompt: "从此文本片段中提取 3-5 个关键技术关键词（如装备型号、地点、频段、信号类型等），返回 JSON 字符串数组。"
+
+    - name: summary
+      source: llm
+      type: text
+      description: "一句话摘要"
+      llm_prompt: "请根据此文本片段生成一段用于语义向量检索（Embedding）的检索增强文本，而不是阅读摘要。该文本应最大程度保留能够帮助检索的重要语义信息（主题、实体、对象、专业术语、时间、事件、关键词等），允许适当压缩描述，但不得丢失影响检索的重要信息。最终输出应提高语义召回能力，而不是追求语言精炼。"
+
+  rule_fields: []
+    # - name: has_numeric_data
+    #   source: rule
+    #   type: boolean
+    #   description: "是否包含数值数据（经纬度、频率、数量等）"
+    #   rule_pattern: "\\d+(\\.\\d+)?\\s*(°|E|N|MHz|GHz|dB|km|nm|架|艘|次)"
+
+  filename_fields:
+  # 村粗原始文件名（五扩展名）到title字段
+    - name: title
+      source: filename
+      type: string
+      description: "文档标题从文件名获取"
+      auto_file_name: true
+      
+    - name: doc_category
+      source: filename
+      type: string
+      description: "文档类别"
+      rules:
+        - pattern: "快报"
+          value: "快报"
+          priority: 10
+        - pattern: "周报"
+          value: "周报"
+          priority: 10 
+        - pattern: "要报"
+          value: "要报"
+          priority: 10
+        - pattern: "月报"
+          value: "月报"
+          priority: 10 
+        - pattern: "制度规范|规定|条例|案例"
+          value: "制度规范"
+          priority: 10
+
+    - name: target_country
+      source: filename
+      type: string
+      description: "目标国家地区"
+      rules:
+        - pattern: "美国|美|美军"
+          value: "美国"
+          priority: 10
+        - pattern: "日本|日军|日"
+          value: "日"
+          priority: 10 
+
+    - name: entity_name
+      source: filename
+      type: string
+      description: "装备/系统名称"
+      rules:
+        - pattern: "([A-Za-z0-9/-]+)雷达"
+          value: "{1}"
+          priority: 10
+        - pattern: "E-2K|F20|F16"
+          value: "{matched}"
+          priority: 10 
+
+    - name: entity_type
+      source: filename
+      type: string
+      description: "实体类型，根据entity_name映射"
+      depends_on: entity_name
+      rules:
+        - pattern: "雷达"
+          value: "雷达"
+          priority: 10
+        - pattern: "通信|话音"
+          value: "通信"
+          priority: 10 
+
+  manual_fields:
+    # - name: doc_type
+    #   source: manual
+    #   type: string
+    #   description: "文档类型（如 周报、研究报告）"
+
+    - name: doc_date
+      source: manual
+      type: string
+      description: "文档时间"

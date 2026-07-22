@@ -213,9 +213,9 @@ class HeadingDetector:
             if tag == "markdown":
                 raw_level = len(m.group(1))  # number of #
             elif tag == "decimal":
-                # Count dots for level: 1.→2, 1.1→3, 1.1.1→4
+                # Count dots for level: 1.→3, 1.1→4, 1.1.1→5
                 dots = m.group(1).count(".")
-                raw_level = dots + 2
+                raw_level = dots + 3
 
             if raw_level is not None and raw_level > 0:
                 level = raw_level

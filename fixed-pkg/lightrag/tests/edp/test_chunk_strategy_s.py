@@ -226,11 +226,17 @@ def test_leaf_fallback_preserves_paragraphs_with_single_nl():
     chunks = _leaf_fallback_split(
         t, text, max_tokens=1024,
         section_id="测试章节", parent_section_id="",
+        parent_headings=["父标题"], level=2,
+        full_section_id="1. 测试章节",
     )
     # Two paragraphs, each < 1024 tokens → each should be its own paragraph chunk
     assert len(chunks) == 2
     for c in chunks:
         assert c["split_type"] == "paragraph"
+        # Fallback chunks now carry parent info
+        assert c["level"] == 2
+        assert c["parent_headings"] == ["父标题"]
+        assert "父标题" in c["heading_breadcrumb"]
 
 
 def test_leaf_fallback_sentence_split_oversized_paragraph():
@@ -241,11 +247,14 @@ def test_leaf_fallback_sentence_split_oversized_paragraph():
     chunks = _leaf_fallback_split(
         t, text, max_tokens=50,
         section_id="数据", parent_section_id="",
+        parent_headings=["统计"], level=3,
+        full_section_id="2. 数据",
     )
     assert len(chunks) > 1
-    # Every chunk ≤ max_tokens, and each is a single sentence
     for c in chunks:
         assert c["tokens"] <= 50
+        assert c["level"] == 3
+        assert "统计" in c["heading_breadcrumb"]
 
 
 def test_chinese_headings_create_sections():

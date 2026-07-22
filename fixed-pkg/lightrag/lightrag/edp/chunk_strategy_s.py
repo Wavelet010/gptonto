@@ -64,9 +64,9 @@ def chunking_by_structure(
             lv = heading_levels.get(h.tag)
             if lv is not None:
                 if h.tag == "decimal":
-                    # decimal_base: level of "1." (1 dot).
-                    # Original level = dots + 2, so dots = level - 2.
-                    dots = h.level - 2
+                    # decimal_base: level of "1." (default 3).
+                    # Original level = dots + 3, so dots = level - 3.
+                    dots = h.level - 3
                     h.level = max(1, min(6, lv + dots))
                 else:
                     h.level = max(1, min(6, lv))
@@ -119,7 +119,8 @@ class _Heading:
 
 class _Section:
     """A heading-bounded region of the document."""
-    __slots__ = ("heading", "full_heading", "parent_headings", "level",
+    __slots__ = ("heading", "full_heading", "parent_headings",
+                 "parent_full_headings", "level",
                  "text", "start", "end", "children", "total_tokens")
     def __init__(
         self,
@@ -130,10 +131,12 @@ class _Section:
         start: int,
         end: int,
         full_heading: str = "",
+        parent_full_headings: list[str] | None = None,
     ) -> None:
         self.heading = heading
         self.full_heading = full_heading  # original heading line with prefix
         self.parent_headings = list(parent_headings)
+        self.parent_full_headings = list(parent_full_headings) if parent_full_headings else []
         self.level = level
         self.text = text          # all content under this heading
         self.start = start
@@ -200,6 +203,7 @@ def _build_section_tree(
                 ancestors.append(prev)
 
         parent_headings = [a.text for a in ancestors]
+        parent_full_headings = [a.full_text for a in ancestors]
 
         # Section body: from this heading line → next heading at ≤ h.level.
         body_start = h.end + 1
@@ -218,6 +222,7 @@ def _build_section_tree(
             start=h.start,
             end=body_end,
             full_heading=h.full_text,
+            parent_full_headings=parent_full_headings,
         )
 
         # Attach to tree: find parent (last ancestor at level < h.level).
@@ -316,6 +321,9 @@ def _dfs_tree_split(
                     tokenizer, lead_text, max_tokens,
                     section_id=node.heading,
                     parent_section_id=parent_section_id,
+                    parent_headings=list(node.parent_full_headings or node.parent_headings),
+                    level=node.level,
+                    full_section_id=node.full_heading or "",
                 )
                 chunks.extend(fallback)
 
@@ -334,6 +342,9 @@ def _dfs_tree_split(
         tokenizer, node.text, max_tokens,
         section_id=node.heading,
         parent_section_id=parent_section_id,
+        parent_headings=list(node.parent_full_headings or node.parent_headings),
+        level=node.level,
+        full_section_id=node.full_heading or "",
     )
 
 
@@ -381,27 +392,39 @@ def _leaf_fallback_split(
     *,
     section_id: str,
     parent_section_id: str,
+    parent_headings: list[str] | None = None,
+    level: int = 0,
+    full_section_id: str = "",
 ) -> list[dict[str, Any]]:
     """Split an oversized leaf section by paragraph, then sentence.
 
     Paragraphs that fit within *max_tokens* are kept as-is.  A paragraph
     that is still too large is further split into sentences.
     """
+    _parent_headings = list(parent_headings) if parent_headings else []
     chunks: list[dict[str, Any]] = []
 
     paragraphs = _split_by_paragraph(text)
     for para in paragraphs:
         p_tokens = _count_tokens(tokenizer, para)
         if p_tokens <= max_tokens:
-            ch = _make_fallback_chunk(para, p_tokens, "paragraph",
-                                      section_id, parent_section_id)
+            ch = _make_fallback_chunk(
+                para, p_tokens, "paragraph",
+                section_id, parent_section_id,
+                parent_headings=_parent_headings, level=level,
+                full_section_id=full_section_id,
+            )
             chunks.append(ch)
         else:
             sentences = _split_by_sentence(para)
             for sent in sentences:
                 s_tokens = _count_tokens(tokenizer, sent)
-                ch = _make_fallback_chunk(sent, s_tokens, "sentence",
-                                          section_id, parent_section_id)
+                ch = _make_fallback_chunk(
+                    sent, s_tokens, "sentence",
+                    section_id, parent_section_id,
+                    parent_headings=_parent_headings, level=level,
+                    full_section_id=full_section_id,
+                )
                 chunks.append(ch)
 
     return chunks
@@ -413,15 +436,28 @@ def _make_fallback_chunk(
     split_type: str,
     section_id: str,
     parent_section_id: str,
+    *,
+    parent_headings: list[str] | None = None,
+    level: int = 0,
+    full_section_id: str = "",
 ) -> dict[str, Any]:
+    _parent_headings = list(parent_headings) if parent_headings else []
+    _heading_display = full_section_id or section_id
+    breadcrumb = (
+        HEADING_BREADCRUMB_SEP.join(
+            _parent_headings + ([_heading_display] if _heading_display else [])
+        )
+        if _heading_display
+        else ""
+    )
     ch = {
         "content": text.strip(),
         "tokens": tokens,
         "chunk_order_index": 0,
         "heading": section_id,
-        "parent_headings": [],
-        "level": 0,
-        "heading_breadcrumb": section_id or "",
+        "parent_headings": _parent_headings,
+        "level": level,
+        "heading_breadcrumb": breadcrumb,
         "split_type": split_type,
         "section_id": section_id,
         "parent_section_id": parent_section_id,
@@ -442,11 +478,16 @@ def _make_chunk(
     section_id: str,
     parent_section_id: str,
 ) -> dict[str, Any]:
+    # Breadcrumb uses full heading text (with numbering prefix) so users see
+    # e.g. "二、网电对抗态势 → （一）雷达对抗 → 1. 截获记录"
+    # rather than stripped "网电对抗态势 → 雷达对抗 → 截获记录".
+    parent_chain = sec.parent_full_headings if sec.parent_full_headings else sec.parent_headings
+    heading_display = sec.full_heading or sec.heading
     breadcrumb = (
         HEADING_BREADCRUMB_SEP.join(
-            sec.parent_headings + ([sec.heading] if sec.heading else [])
+            parent_chain + ([heading_display] if heading_display else [])
         )
-        if sec.heading
+        if heading_display
         else ""
     )
     return {
