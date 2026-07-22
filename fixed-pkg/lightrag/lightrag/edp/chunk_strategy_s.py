@@ -399,7 +399,8 @@ def _leaf_fallback_split(
     """Split an oversized leaf section by paragraph, then sentence.
 
     Paragraphs that fit within *max_tokens* are kept as-is.  A paragraph
-    that is still too large is further split into sentences.
+    that is still too large is further split into sentences; adjacent
+    sentences are greedily merged to fill the token budget.
     """
     _parent_headings = list(parent_headings) if parent_headings else []
     chunks: list[dict[str, Any]] = []
@@ -417,10 +418,28 @@ def _leaf_fallback_split(
             chunks.append(ch)
         else:
             sentences = _split_by_sentence(para)
+            # Greedy merge: combine adjacent sentences up to max_tokens
+            buf_text = ""
+            buf_tokens = 0
             for sent in sentences:
                 s_tokens = _count_tokens(tokenizer, sent)
+                if buf_tokens + s_tokens <= max_tokens:
+                    buf_text += sent
+                    buf_tokens = _count_tokens(tokenizer, buf_text)
+                else:
+                    if buf_text:
+                        ch = _make_fallback_chunk(
+                            buf_text, buf_tokens, "sentence",
+                            section_id, parent_section_id,
+                            parent_headings=_parent_headings, level=level,
+                            full_section_id=full_section_id,
+                        )
+                        chunks.append(ch)
+                    buf_text = sent
+                    buf_tokens = s_tokens
+            if buf_text:
                 ch = _make_fallback_chunk(
-                    sent, s_tokens, "sentence",
+                    buf_text, buf_tokens, "sentence",
                     section_id, parent_section_id,
                     parent_headings=_parent_headings, level=level,
                     full_section_id=full_section_id,

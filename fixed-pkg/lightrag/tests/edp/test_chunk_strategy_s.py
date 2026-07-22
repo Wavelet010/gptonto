@@ -240,7 +240,7 @@ def test_leaf_fallback_preserves_paragraphs_with_single_nl():
 
 
 def test_leaf_fallback_sentence_split_oversized_paragraph():
-    """A single oversized paragraph falls back to sentence splitting."""
+    """A single oversized paragraph falls back to sentence splitting + greedy merge."""
     t = _t()
     long_sentence = "这是一段非常长的数据分析报告文本内容。"
     text = long_sentence * 60
@@ -255,6 +255,33 @@ def test_leaf_fallback_sentence_split_oversized_paragraph():
         assert c["tokens"] <= 50
         assert c["level"] == 3
         assert "统计" in c["heading_breadcrumb"]
+    # Greedy merge: each chunk should contain multiple sentences, not just one
+    for c in chunks:
+        sentence_count = c["content"].count("。")
+        assert sentence_count >= 1, (
+            f"Expected merged sentences, got single sentence chunk: {c['content'][:60]}"
+        )
+
+
+def test_leaf_fallback_sentence_merge_fills_budget():
+    """Greedy merge should fill token budget with as many sentences as fit."""
+    t = _t()
+    # Each sentence ~32 tokens, max_tokens=50 → at most 2 sentences per chunk
+    # But the sentences are "短句一。" etc, each very short
+    short_sentence = "短句。"
+    text = short_sentence * 50
+    chunks = _leaf_fallback_split(
+        t, text, max_tokens=50,
+        section_id="测试", parent_section_id="",
+    )
+    assert len(chunks) > 0
+    # Each chunk should have multiple sentences
+    for c in chunks:
+        assert c["tokens"] <= 50
+        # Should contain more than 1 sentence unit
+        assert c["content"].count("。") >= 2, (
+            f"Expected >=2 sentences per chunk, got: {c['content'][:80]}"
+        )
 
 
 def test_chinese_headings_create_sections():
