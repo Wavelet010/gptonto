@@ -2262,6 +2262,8 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
             conversation_history=param.conversation_history,
             user_prompt=param.user_prompt,
             enable_rerank=param.enable_rerank,
+            metadata_filter=param.metadata_filter,
+            filter_mode=param.filter_mode,
         )
 
         query_result = None

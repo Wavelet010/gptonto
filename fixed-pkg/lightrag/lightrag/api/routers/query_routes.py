@@ -144,9 +144,13 @@ class QueryRequest(BaseModel):
         request_data = self.model_dump(
             exclude_none=True, exclude={"query", "include_chunk_content", "filter_mode"}
         )
+        import logging
+        _log = logging.getLogger(__name__)
+        _log.info("DEBUG to_query_params: mf_in=%s mf_out=%s", self.metadata_filter, request_data.get("metadata_filter"))
 
         # Ensure `mode` and `stream` are set explicitly
         param = QueryParam(**request_data)
+        _log.info("DEBUG QueryParam created: mf=%s", param.metadata_filter)
         param.stream = is_stream
         return param
 

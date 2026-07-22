@@ -15,6 +15,7 @@ services:
     image: lightrag-base:latest
     container_name: lightrag-edp
     entrypoint: ["/app/lightrag/docker-entrypoint.sh"]
+    command: ["python", "-m", "lightrag.api.lightrag_server"]
     ports:
       - "9621:9621"
     volumes:
