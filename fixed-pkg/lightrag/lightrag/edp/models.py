@@ -6,6 +6,25 @@ from pydantic import BaseModel, Field
 from typing import Literal
 
 
+class FilenameRule(BaseModel):
+    """A single regex rule for extracting metadata from a filename string."""
+    pattern: str  # regex pattern (re.search)
+    value: str  # literal value, "{1}" for capture group 1, or "{matched}" for full match
+    priority: int = 0  # higher wins when multiple rules match
+
+
+class FilenameFieldConfig(BaseModel):
+    """A field extracted from the document filename via rules or auto-detection."""
+    name: str
+    source: str = "filename"
+    type: str = "string"
+    description: str = ""
+    auto_file_name: bool = False  # extract filename without extension as-is
+    depends_on: str | None = None  # field name to wait for before running rules
+    rules: list[FilenameRule] = Field(default_factory=list)
+    output_key: str | None = None  # storage key, defaults to name
+
+
 class ContextBuilderConfig(BaseModel):
     """Configuration for the context builder (embedding_text construction)."""
     enabled: bool = True
@@ -34,6 +53,7 @@ class MetadataBuilderConfig(BaseModel):
     llm_fields: list[MetadataFieldConfig] = Field(default_factory=list)
     rule_fields: list[MetadataFieldConfig] = Field(default_factory=list)
     manual_fields: list[MetadataFieldConfig] = Field(default_factory=list)
+    filename_fields: list[FilenameFieldConfig] = Field(default_factory=list)
 
 
 class ParserProfile(BaseModel):

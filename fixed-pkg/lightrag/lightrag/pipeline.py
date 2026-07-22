@@ -191,207 +191,6 @@ def _format_chunking_params(
     return ", ".join(pieces)
 
 
-# ---------------------------------------------------------------------------
-# EDP: LLM-based metadata extraction
-# ---------------------------------------------------------------------------
-
-
-async def _edp_llm_metadata(
-    rag: Any,
-    mb_config: Any,
-    chunks: list[dict[str, Any]],
-    full_content: str,
-) -> None:
-    """Extract document-level and chunk-level metadata via LLM.
-
-    - *document_fields*: one LLM call for the whole document.
-    - *llm_fields*: one batched LLM call for all chunks.
-    """
-    from lightrag.edp.models import MetadataBuilderConfig
-
-    if not isinstance(mb_config, MetadataBuilderConfig):
-        return
-
-    # --- Document-level extraction (one call) ---
-    if mb_config.document_fields:
-        prompts = []
-        for f in mb_config.document_fields:
-            if f.llm_prompt:
-                prompts.append(f"- {f.name}: {f.llm_prompt}")
-        if prompts:
-            sys_msg = (
-                "You are a metadata extraction assistant. Extract the requested "
-                "fields from the document. Return a JSON object with field names "
-                "as keys. Return ONLY the JSON, no explanation."
-            )
-            user_msg = (
-                "Document:\n"
-                f"{full_content[:8000]}\n\n"
-                "Extract these fields:\n"
-                + "\n".join(prompts)
-                + "\n\nReturn as JSON:"
-            )
-            try:
-                result = await _edp_llm_call(rag, sys_msg, user_msg)
-                import json as _json
-                doc_meta = _json.loads(result) if isinstance(result, str) else result
-                if isinstance(doc_meta, dict):
-                    for ch in chunks:
-                        ch.setdefault("_edp_meta", {}).update(doc_meta)
-                    logger.info(
-                        "EDP document metadata extracted: %s",
-                        list(doc_meta.keys()),
-                    )
-            except Exception:
-                logger.warning("EDP document-level LLM extraction failed — title/equipment will be missing", exc_info=True)
-
-    # --- Chunk-level extraction (batched, with retry and graceful degradation) ---
-    if mb_config.llm_fields:
-        field_specs = []
-        for f in mb_config.llm_fields:
-            if f.llm_prompt:
-                field_specs.append(f)
-        if field_specs:
-            import json as _json
-
-            def _extract_json(text: str) -> str:
-                """Strip markdown code fences from LLM JSON responses."""
-                import re
-                m = re.search(
-                    r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL
-                )
-                if m:
-                    return m.group(1).strip()
-                return text.strip()
-
-            prompts = [f"- {f.name}: {f.llm_prompt}" for f in field_specs]
-            sys_msg = (
-                "You are a metadata extraction assistant. For each chunk, extract "
-                "the requested fields. Return a JSON array: "
-                '[{"chunk":0,"field1":"value1",...},...]. '
-                "Return ONLY the JSON, no explanation."
-            )
-
-            # Split into sub-batches so a single failure doesn't lose everything.
-            BATCH_SIZE = 5
-            extracted = 0
-            for batch_start in range(0, len(chunks), BATCH_SIZE):
-                batch_chunks = chunks[batch_start:batch_start + BATCH_SIZE]
-
-                # ---- Try batch extraction first ----
-                arr: list | None = None
-                for attempt in range(2):
-                    try:
-                        blocks = []
-                        for local_i, ch in enumerate(batch_chunks):
-                            blocks.append(
-                                f"[Chunk {local_i}]"
-                                f"\n{ch.get('content', '')[:2000]}\n"
-                            )
-                        user_msg = (
-                            f"Chunks:\n{''.join(blocks)}\n"
-                            "Extract these fields for EACH chunk:\n"
-                            + "\n".join(prompts)
-                            + "\n\nReturn as JSON array:"
-                        )
-                        result = await _edp_llm_call(rag, sys_msg, user_msg)
-                        raw = _extract_json(
-                            result if isinstance(result, str) else str(result)
-                        )
-                        if not raw:
-                            continue
-                        arr = _json.loads(raw)
-                        if isinstance(arr, list) and len(arr) > 0:
-                            break  # got a non-empty list
-                        arr = None  # empty list → treat as failure, retry
-                    except Exception:
-                        arr = None
-                        if attempt < 1:
-                            continue
-
-                if isinstance(arr, list):
-                    for item in arr:
-                        local_idx = item.get("chunk", -1)
-                        global_idx = batch_start + local_idx
-                        if 0 <= local_idx < len(batch_chunks):
-                            item.pop("chunk", None)
-                            chunks[global_idx].setdefault(
-                                "_edp_meta", {}
-                            ).update(item)
-                            extracted += 1
-                    continue  # batch succeeded
-
-                # ---- Batch failed → fall back to per-chunk extraction ----
-                logger.warning(
-                    "EDP chunk-level batch [%d:%d] failed — "
-                    "falling back to per-chunk extraction",
-                    batch_start, batch_start + len(batch_chunks),
-                )
-                for offset, ch in enumerate(batch_chunks):
-                    global_idx = batch_start + offset
-                    try:
-                        user_msg = (
-                            f"Chunk:\n{ch.get('content', '')[:3000]}\n\n"
-                            "Extract these fields for this chunk:\n"
-                            + "\n".join(prompts)
-                            + "\n\nReturn as JSON object:"
-                        )
-                        # Adapt system prompt for single-chunk mode
-                        single_sys = (
-                            "You are a metadata extraction assistant. "
-                            "Extract the requested fields from the chunk. "
-                            "Return a JSON object with field names as keys. "
-                            "Return ONLY the JSON, no explanation."
-                        )
-                        result = await _edp_llm_call(rag, single_sys, user_msg)
-                        raw = _extract_json(
-                            result if isinstance(result, str) else str(result)
-                        )
-                        if raw:
-                            obj = _json.loads(raw)
-                            if isinstance(obj, dict):
-                                chunks[global_idx].setdefault(
-                                    "_edp_meta", {}
-                                ).update(obj)
-                                extracted += 1
-                    except Exception:
-                        pass  # individual chunk failed → skip, others continue
-
-            if extracted:
-                logger.info(
-                    "EDP chunk-level metadata extracted for %d/%d chunks",
-                    extracted, len(chunks),
-                )
-            else:
-                logger.warning(
-                    "EDP chunk-level LLM metadata extraction failed — "
-                    "summary/keywords will use fallback values. "
-                    "Check LLM_BINDING configuration or LLM response format."
-                )
-
-
-async def _edp_llm_call(
-    rag: Any,
-    system_prompt: str,
-    user_prompt: str,
-) -> str:
-    """Simple LLM call for metadata extraction via bypass mode."""
-    from lightrag.base import QueryParam
-
-    param = QueryParam(mode="bypass")
-    result = await rag.aquery(
-        query=user_prompt,
-        param=param,
-        system_prompt=system_prompt,
-    )
-    if isinstance(result, str):
-        return result
-    return str(result)
-
-
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class _BatchRunContext:
     """Per-batch shared state for the parse/analyze/process worker pipeline.
@@ -2548,18 +2347,19 @@ class _PipelineMixin:
                                     profile = pm.get_profile(profile_name)
                                     ctx_cfg = profile.context_builder
                                     mb_config = profile.metadata_builder
-                                    # Use document first line as title, fall back to filename.
+                                    # Use filename (without extension) as title; fall back to
+                                    # document first line if filename is unavailable.
+                                    if not doc_title.strip():
+                                        import os as _edp_os_path
+                                        _fn = _edp_os_path.path.splitext(
+                                            _edp_os_path.path.basename(str(file_path or ""))
+                                        )[0]
+                                        doc_title = _fn
                                     if not doc_title.strip():
                                         first_line = content.strip().split("\n")[0].strip()
                                         if first_line.startswith("{{LRdoc}}"):
                                             first_line = first_line[len("{{LRdoc}}"):].strip()
                                         doc_title = first_line
-                                    # Final fallback: use the file name (without extension).
-                                    if not doc_title.strip():
-                                        import os as _edp_os_path
-                                        doc_title = _edp_os_path.path.splitext(
-                                            _edp_os_path.path.basename(str(file_path or ""))
-                                        )[0]
                                     logger.info(
                                         "EDP profile '%s' loaded for doc_id=%s",
                                         profile_name, doc_id,
@@ -2609,38 +2409,30 @@ class _PipelineMixin:
                                     ]
                                 )
                             )
-                            # --- Build base metadata (heading + rule, no LLM) ---
-                            for ch in chunking_result:
-                                meta: dict[str, Any] = {}
-                                meta.update(
-                                    heading_mb._extract_heading_metadata(ch)
-                                )
-                                if mb_config and mb_config.rule_fields:
-                                    meta.update(
-                                        heading_mb._extract_rule_metadata(
-                                            ch.get("content", "")
+                            # --- Filename metadata (document-level, once) ---
+                            fn_meta: dict[str, Any] = {}
+                            if mb_config and mb_config.filename_fields:
+                                import os as _edp_os_path2
+                                _file_base = _edp_os_path2.path.splitext(
+                                    _edp_os_path2.path.basename(
+                                        str(file_path or "")
+                                    )
+                                )[0]
+                                if _file_base:
+                                    fn_meta = heading_mb.extract_filename_metadata(
+                                        _file_base
+                                    )
+                                    if fn_meta:
+                                        logger.info(
+                                            "EDP filename metadata extracted for doc_id=%s: %s",
+                                            doc_id, list(fn_meta.keys()),
                                         )
-                                    )
-                                if mb_config and mb_config.manual_fields:
-                                    meta.update(
-                                        heading_mb._extract_manual_metadata()
-                                    )
-                                ch["_edp_meta"] = meta
 
-                            # --- LLM extraction (document-level + chunk-level) ---
-                            if mb_config and (
-                                mb_config.document_fields or mb_config.llm_fields
-                            ):
-                                try:
-                                    await _edp_llm_metadata(
-                                        self, mb_config,
-                                        chunking_result, content,
-                                    )
-                                except Exception:
-                                    logger.warning(
-                                        "EDP LLM metadata skipped for doc_id=%s",
-                                        doc_id, exc_info=True,
-                                    )
+                            # --- Unified metadata extraction ---
+                            await heading_mb.apply_to_chunks(
+                                chunking_result, self, content,
+                                extra_doc_meta=fn_meta,
+                            )
 
                             # --- Serialize: JSON string (backward compat) + flat
                             #     top-level fields (Milvus scalar filter compat).
