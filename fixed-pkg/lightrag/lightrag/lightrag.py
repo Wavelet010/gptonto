@@ -2151,9 +2151,9 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
         if not existing_ids:
             return {"deleted": 0, "affected_entities": 0, "affected_relations": 0}
 
-        chunk_ids_set = set(unique_ids)
         # Deduplicate
         unique_ids = list(set(existing_ids))
+        chunk_ids_set = set(unique_ids)
         deleted_count = len(unique_ids)
 
         # 1. Delete chunk vectors + text
