@@ -2151,12 +2151,16 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
         if not existing_ids:
             return {"deleted": 0, "affected_entities": 0, "affected_relations": 0}
 
-        chunk_ids_set = set(existing_ids)
-        deleted_count = len(existing_ids)
+        chunk_ids_set = set(unique_ids)
+        # Deduplicate
+        unique_ids = list(set(existing_ids))
+        deleted_count = len(unique_ids)
 
         # 1. Delete chunk vectors + text
-        await self.chunks_vdb.delete(existing_ids)
-        await self.text_chunks.delete(existing_ids)
+        await self.chunks_vdb.delete(unique_ids)
+        await self.text_chunks.delete(unique_ids)
+        # Persist text_chunks to disk so deletions survive restart
+        await self.text_chunks.index_done_callback()
         logger.info("Deleted %d chunk(s) from storage", deleted_count)
 
         # 2. Clean entity_chunks references + delete orphaned entities
