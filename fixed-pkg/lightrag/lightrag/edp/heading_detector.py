@@ -90,9 +90,12 @@ class HeadingDetector:
         cls._EXCLUSIONS = [
             # 段落标签: 第一段, 第二部分 — NOT headings
             (re.compile(r"^第[一二三四五六七八九十\d]+[段部分]"), 60, "paragraph_label"),
-            # 图表编号: 图1, 表2, Figure 1, Table 2
-            (re.compile(r"^[图表][\s\d]"), 60, "figure_table"),
-            (re.compile(r"^(Figure|Table)\s+\d", re.IGNORECASE), 60, "figure_table_en"),
+            # 图表编号: 图1, 表2, Figure 1, Table 2, Fig.1
+            # Penalty 90 > context max (40) → can never reach threshold 70
+            (re.compile(r"^[图表][\s\d]"), 90, "figure_table"),
+            (re.compile(r"^(Fig\.?|Figure|Table)\s+\d", re.IGNORECASE), 90, "figure_table_en"),
+            # XML/HTML 标签: <drawing>, <table>, <img> 等
+            (re.compile(r"^<[a-zA-Z]"), 90, "xml_tag"),
             # 行尾冒号 — 段落引导语，不是标题
             (re.compile(r"[：:]\s*$"), 30, "colon_end"),
         ]
