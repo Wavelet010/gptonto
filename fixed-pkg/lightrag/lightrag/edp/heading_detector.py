@@ -212,7 +212,7 @@ class HeadingDetector:
 
         for line_to_try in (line, line.lstrip("#")):
             for pattern, default_level, base_score, tag in cls._PATTERNS:
-                if tag == "markdown" and line_to_try is not line:
+                if tag == "markdown" and line_to_try != line:
                     continue  # skip md pattern on stripped fallback
                 m = pattern.match(line_to_try)
                 if not m:
