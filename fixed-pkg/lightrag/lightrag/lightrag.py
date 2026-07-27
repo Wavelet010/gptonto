@@ -2145,13 +2145,19 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
         if not chunk_ids:
             return {"deleted": 0, "affected_entities": 0, "affected_relations": 0}
 
-        _log = logging.getLogger(__name__)
-        chunk_ids_set = set(chunk_ids)
+        # Filter to only chunks that actually exist (idempotency guard)
+        existing = await self.text_chunks.get_by_ids(chunk_ids)
+        existing_ids = [ch["id"] for ch in existing if ch and "id" in ch]
+        if not existing_ids:
+            return {"deleted": 0, "affected_entities": 0, "affected_relations": 0}
+
+        chunk_ids_set = set(existing_ids)
+        deleted_count = len(existing_ids)
 
         # 1. Delete chunk vectors + text
-        await self.chunks_vdb.delete(chunk_ids)
-        await self.text_chunks.delete(chunk_ids)
-        _log.info("Deleted %d chunk(s) from storage", len(chunk_ids))
+        await self.chunks_vdb.delete(existing_ids)
+        await self.text_chunks.delete(existing_ids)
+        logger.info("Deleted %d chunk(s) from storage", deleted_count)
 
         # 2. Clean entity_chunks references + delete orphaned entities
         affected_entities = 0
@@ -2175,7 +2181,7 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
             await self.entity_chunks.delete([en])
             await self.chunk_entity_relation_graph.delete_node(en)
         if entity_names_to_delete:
-            _log.info("Deleted %d orphaned entity(s)", len(entity_names_to_delete))
+            logger.info("Deleted %d orphaned entity(s)", len(entity_names_to_delete))
 
         # 3. Clean relation_chunks references + delete orphaned relations
         affected_relations = 0
@@ -2202,10 +2208,10 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
                             [(parts[0], parts[1])]
                         )
 
-        _log.info("Chunk deletion complete: %d entities, %d relations affected",
+        logger.info("Chunk deletion complete: %d entities, %d relations affected",
                   affected_entities, affected_relations)
         return {
-            "deleted": len(chunk_ids),
+            "deleted": deleted_count,
             "affected_entities": affected_entities,
             "affected_relations": affected_relations,
             "orphaned_entities": len(entity_names_to_delete),
@@ -2289,7 +2295,7 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
                 await self.text_chunks.upsert({cid: current})
                 synced += 1
 
-        _log.info(
+        logger.info(
             "Synced metadata for %d/%d chunks of %s, fields=%s",
             synced, len(chunk_ids), doc_id, sorted(all_fields),
         )
