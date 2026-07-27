@@ -1660,6 +1660,8 @@ async def pipeline_enqueue_file(
         extraction_engine = directives.engine
         process_options = directives.process_options
         api_process_options = process_options or PROCESS_OPTION_CHUNK_FIXED
+        if skip_graph and "!" not in api_process_options:
+            api_process_options += "!"
 
         # Overlay any per-file chunk parameters (from the filename hint or a
         # LIGHTRAG_PARSER rule) onto the active strategy's chunk_options so the
@@ -2616,6 +2618,7 @@ def create_document_routes(
         file: UploadFile = File(...),
         chunking: Optional[str] = Form(None),
         profile: Optional[str] = Form(None),
+        skip_graph: bool = Form(False),
     ):
         """
         Upload a file to the input directory and index it.

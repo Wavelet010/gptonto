@@ -304,7 +304,7 @@ const NodePropertiesView = ({ node, pipelineBusy }: { node: NodeType; pipelineBu
           </Button>
         </div>
       </div>
-      <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
+      <div className="bg-card max-h-96 overflow-auto rounded p-1 border">
         <PropertyRow name={t('graphPanel.propertiesView.node.id')} value={String(node.id)} />
         <PropertyRow
           name={t('graphPanel.propertiesView.node.labels')}
@@ -315,8 +315,8 @@ const NodePropertiesView = ({ node, pipelineBusy }: { node: NodeType; pipelineBu
         />
         <PropertyRow name={t('graphPanel.propertiesView.node.degree')} value={node.degree} />
       </div>
-      <h3 className="text-md pl-1 font-bold tracking-wide text-amber-700">{t('graphPanel.propertiesView.node.properties')}</h3>
-      <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
+      <h3 className="text-md pl-1 font-bold tracking-wide text-amber-700 dark:text-amber-400">{t('graphPanel.propertiesView.node.properties')}</h3>
+      <div className="bg-card max-h-96 overflow-auto rounded p-1 border">
         {Object.keys(node.properties)
           .sort()
           .map((name) => {
@@ -341,7 +341,7 @@ const NodePropertiesView = ({ node, pipelineBusy }: { node: NodeType; pipelineBu
           <h3 className="text-md pl-1 font-bold tracking-wide text-emerald-700">
             {t('graphPanel.propertiesView.node.relationships')}
           </h3>
-          <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
+          <div className="bg-card max-h-96 overflow-auto rounded p-1 border">
             {node.relationships.map(({ type, id, label }) => {
               return (
                 <PropertyRow
@@ -382,7 +382,7 @@ const EdgePropertiesView = ({ edge, pipelineBusy }: { edge: EdgeType; pipelineBu
           </Button>
         )}
       </div>
-      <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
+      <div className="bg-card max-h-96 overflow-auto rounded p-1 border">
         <PropertyRow name={t('graphPanel.propertiesView.edge.id')} value={edge.id} />
         {edge.type && <PropertyRow name={t('graphPanel.propertiesView.edge.type')} value={edge.type} />}
         <PropertyRow
@@ -400,8 +400,8 @@ const EdgePropertiesView = ({ edge, pipelineBusy }: { edge: EdgeType; pipelineBu
           }}
         />
       </div>
-      <h3 className="text-md pl-1 font-bold tracking-wide text-amber-700">{t('graphPanel.propertiesView.edge.properties')}</h3>
-      <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
+      <h3 className="text-md pl-1 font-bold tracking-wide text-amber-700 dark:text-amber-400">{t('graphPanel.propertiesView.edge.properties')}</h3>
+      <div className="bg-card max-h-96 overflow-auto rounded p-1 border">
         {Object.keys(edge.properties)
           .sort()
           .map((name) => {
