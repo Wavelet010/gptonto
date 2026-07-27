@@ -198,35 +198,45 @@ class HeadingDetector:
 
     @classmethod
     def _pattern_score(cls, line: str) -> tuple[int, int, str, re.Match | None]:
-        """Return (score, level, reason_tag, match) for the best pattern."""
+        """Return (score, level, reason_tag, match) for the best pattern.
+
+        When *line* starts with ``#`` but has no space after the hash
+        (e.g. ``##1. 截获记录`` from docx→md conversion), strips the
+        leading ``#`` characters and re-matches against the non-markdown
+        patterns so our custom heading types take priority.
+        """
         best_score = 0
         best_level = 0
         best_reason = ""
         best_match = None
 
-        for pattern, default_level, base_score, tag in cls._PATTERNS:
-            m = pattern.match(line)
-            if not m:
-                continue
-            raw_level = default_level
+        for line_to_try in (line, line.lstrip("#")):
+            for pattern, default_level, base_score, tag in cls._PATTERNS:
+                if tag == "markdown" and line_to_try is not line:
+                    continue  # skip md pattern on stripped fallback
+                m = pattern.match(line_to_try)
+                if not m:
+                    continue
+                raw_level = default_level
 
-            if tag == "markdown":
-                raw_level = len(m.group(1))  # number of #
-            elif tag == "decimal":
-                # Count dots for level: 1.→3, 1.1→4, 1.1.1→5
-                dots = m.group(1).count(".")
-                raw_level = dots + 3
+                if tag == "markdown":
+                    raw_level = len(m.group(1))  # number of #
+                elif tag == "decimal":
+                    dots = m.group(1).count(".")
+                    raw_level = dots + 3
 
-            if raw_level is not None and raw_level > 0:
-                level = raw_level
-            else:
-                level = 1
+                if raw_level is not None and raw_level > 0:
+                    level = raw_level
+                else:
+                    level = 1
 
-            if base_score > best_score:
-                best_score = base_score
-                best_level = level
-                best_reason = tag
-                best_match = m
+                if base_score > best_score:
+                    best_score = base_score
+                    best_level = level
+                    best_reason = tag
+                    best_match = m
+            if best_score > 0:
+                break  # matched on first attempt (original line)
 
         return best_score, best_level, best_reason, best_match
 
