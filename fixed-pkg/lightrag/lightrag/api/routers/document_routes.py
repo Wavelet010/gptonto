@@ -4213,4 +4213,23 @@ def create_document_routes(
             "data": result,
         }
 
+    class DeleteChunksRequest(BaseModel):
+        chunk_ids: list[str]
+
+    @router.delete("/chunks/{chunk_id}")
+    async def delete_chunk(chunk_id: str):
+        """Delete a single chunk and clean up all associated data."""
+        result = await rag.delete_chunks([chunk_id])
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        return {"status": "success", "data": result}
+
+    @router.delete("/chunks")
+    async def delete_chunks_batch(request: DeleteChunksRequest):
+        """Delete multiple chunks and clean up all associated data."""
+        result = await rag.delete_chunks(request.chunk_ids)
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        return {"status": "success", "data": result}
+
     return router

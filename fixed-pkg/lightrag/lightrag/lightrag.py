@@ -2132,6 +2132,85 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
             owning_loop=self._owning_loop,
         )
 
+    async def delete_chunks(self, chunk_ids: list[str]) -> dict[str, Any]:
+        """Delete chunks and clean up all associated data.
+
+        Removes chunk vectors, text, metadata, and updates entity/relation
+        references.  Orphaned entities/relations (no remaining source chunks)
+        are also removed.
+
+        Returns a dict with ``deleted``, ``affected_entities``,
+        ``affected_relations``, and optional ``error``.
+        """
+        if not chunk_ids:
+            return {"deleted": 0, "affected_entities": 0, "affected_relations": 0}
+
+        _log = logging.getLogger(__name__)
+        chunk_ids_set = set(chunk_ids)
+
+        # 1. Delete chunk vectors + text
+        await self.chunks_vdb.delete(chunk_ids)
+        await self.text_chunks.delete(chunk_ids)
+        _log.info("Deleted %d chunk(s) from storage", len(chunk_ids))
+
+        # 2. Clean entity_chunks references + delete orphaned entities
+        affected_entities = 0
+        entity_names_to_delete: list[str] = []
+        all_entity_names = list(self.entity_chunks._data.keys()) if self.entity_chunks else []
+        for entity_name in all_entity_names:
+            stored = await self.entity_chunks.get_by_id(entity_name)
+            if not stored or not isinstance(stored, dict):
+                continue
+            old_ids = stored.get("chunk_ids", [])
+            new_ids = [cid for cid in old_ids if cid not in chunk_ids_set]
+            if len(new_ids) == len(old_ids):
+                continue
+            affected_entities += 1
+            if new_ids:
+                await self.entity_chunks.upsert({entity_name: {"chunk_ids": new_ids}})
+            else:
+                entity_names_to_delete.append(entity_name)
+        for en in entity_names_to_delete:
+            await self.entities_vdb.delete([en])
+            await self.entity_chunks.delete([en])
+            await self.chunk_entity_relation_graph.delete_node(en)
+        if entity_names_to_delete:
+            _log.info("Deleted %d orphaned entity(s)", len(entity_names_to_delete))
+
+        # 3. Clean relation_chunks references + delete orphaned relations
+        affected_relations = 0
+        if self.relation_chunks:
+            all_rel_keys = list(self.relation_chunks._data.keys())
+            for rk in all_rel_keys:
+                stored = await self.relation_chunks.get_by_id(rk)
+                if not stored or not isinstance(stored, dict):
+                    continue
+                old_ids = stored.get("chunk_ids", [])
+                new_ids = [cid for cid in old_ids if cid not in chunk_ids_set]
+                if len(new_ids) == len(old_ids):
+                    continue
+                affected_relations += 1
+                if new_ids:
+                    await self.relation_chunks.upsert({rk: {"chunk_ids": new_ids}})
+                else:
+                    # rk is "src<TAB>tgt"
+                    parts = rk.split("\t", 1)
+                    if len(parts) == 2:
+                        await self.relationships_vdb.delete([rk])
+                        await self.relation_chunks.delete([rk])
+                        await self.chunk_entity_relation_graph.remove_edges(
+                            [(parts[0], parts[1])]
+                        )
+
+        _log.info("Chunk deletion complete: %d entities, %d relations affected",
+                  affected_entities, affected_relations)
+        return {
+            "deleted": len(chunk_ids),
+            "affected_entities": affected_entities,
+            "affected_relations": affected_relations,
+            "orphaned_entities": len(entity_names_to_delete),
+        }
+
     async def sync_metadata_from_vdb(self, doc_id: str) -> dict[str, Any]:
         """Sync per-chunk metadata from the vector DB (Milvus) back to JSON KV store.
 
