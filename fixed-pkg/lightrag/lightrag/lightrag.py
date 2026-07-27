@@ -2147,7 +2147,7 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
 
         # Filter to only chunks that actually exist (idempotency guard)
         existing = await self.text_chunks.get_by_ids(chunk_ids)
-        existing_ids = [ch["id"] for ch in existing if ch and "id" in ch]
+        existing_ids = [ch.get("_id") or ch.get("id") for ch in existing if ch]
         if not existing_ids:
             return {"deleted": 0, "affected_entities": 0, "affected_relations": 0}
 
