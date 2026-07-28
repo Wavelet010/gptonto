@@ -5947,6 +5947,10 @@ async def naive_query(
 
     # Parent-child section recall — expand with sibling chunks
     chunks = await _expand_section_chunks(chunks, text_chunks_db, global_config)
+    # Bump chunk_top_k so process_chunks_unified doesn't truncate
+    # the expanded siblings back down to the original limit.
+    if len(chunks) > (query_param.chunk_top_k or 0):
+        query_param.chunk_top_k = len(chunks)
 
     if chunks is None or len(chunks) == 0:
         logger.info(
