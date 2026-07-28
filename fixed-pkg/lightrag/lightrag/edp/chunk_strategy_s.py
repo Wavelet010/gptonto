@@ -292,6 +292,8 @@ def _dfs_tree_split(
 
     # ---------- Case 1: fits → one chunk -----------------------------
     if token_count <= max_tokens:
+        if _is_figure_only(node.text):
+            return []  # pure figure/drawing section — no retrievable text
         ch = _make_chunk(node, node.text, split_type="section",
                          section_id=node.heading or "",
                          parent_section_id=parent_section_id)
@@ -308,7 +310,9 @@ def _dfs_tree_split(
         lead_text = node.text[:lead_end].strip()
         if lead_text:
             lead_tokens = _count_tokens(tokenizer, lead_text)
-            if lead_tokens <= max_tokens:
+            if _is_figure_only(lead_text):
+                pass  # skip pure figure/drawing leading text
+            elif lead_tokens <= max_tokens:
                 ch = _make_chunk(node, lead_text,
                                  split_type="section_lead",
                                  section_id=node.heading,
@@ -567,8 +571,8 @@ def _is_figure_only(text: str) -> bool:
         s = line.strip()
         if not s:
             continue
-        # XML tag line: <drawing .../>, <img ...>
-        if re.match(r"^<[a-zA-Z]", s):
+        # XML tag line: <drawing .../>, <img ...>  (NOT <table> — has data)
+        if re.match(r"^<(drawing|img|image)\b", s, re.IGNORECASE):
             continue
         # Figure/table caption line
         if re.match(r"^(图\s*\d|表\s*\d|Fig\.?\s*\d|Figure\s+\d|Table\s+\d)",
