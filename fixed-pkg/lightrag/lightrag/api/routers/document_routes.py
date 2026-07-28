@@ -1608,6 +1608,7 @@ async def pipeline_enqueue_file(
     from_scan: bool = False,
     chunk_options: dict | None = None,
     extra_metadata: dict | None = None,
+    skip_graph: bool = False,
 ) -> tuple[bool, str]:
     """Add a file to the queue for processing
 
@@ -1787,6 +1788,7 @@ async def pipeline_index_file(
     track_id: str = None,
     chunk_options: dict | None = None,
     extra_metadata: dict | None = None,
+    skip_graph: bool = False,
 ):
     """Index a file with track_id
 
@@ -1802,6 +1804,7 @@ async def pipeline_index_file(
             rag, file_path, track_id,
             chunk_options=chunk_options,
             extra_metadata=extra_metadata,
+            skip_graph=skip_graph,
         )
         if success:
             await rag.apipeline_process_enqueue_documents()
@@ -2873,6 +2876,7 @@ def create_document_routes(
                         rag, file_path, track_id,
                         chunk_options=resolved_chunk_opts,
                         extra_metadata=extra_meta if extra_meta else None,
+                        skip_graph=skip_graph,
                     )
                 finally:
                     await _release_enqueue_slot(rag)
