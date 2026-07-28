@@ -90,7 +90,8 @@
       "Bash(git -C /chenhs/rag commit -m 'v12.4: 修复审查发现的4个问题 *)",
       "Bash(git -C /chenhs/rag commit -m 'v13: 修复docx图表被错误分段 *)",
       "Bash(git -C /chenhs/rag commit -m \"v13.1: 修复 heading_detector 图表文本检查 + _is_figure_only 多行处理\")",
-      "Bash(git -C /chenhs/rag commit -m 'v13.2: 修复审查3个bug *)"
+      "Bash(git -C /chenhs/rag commit -m 'v13.2: 修复审查3个bug *)",
+      "Bash(git -C /chenhs/rag commit -m \"v13.3: _is_figure_only 也过滤 <table> 标签\")"
     ]
   }
 }

@@ -571,8 +571,8 @@ def _is_figure_only(text: str) -> bool:
         s = line.strip()
         if not s:
             continue
-        # XML tag line: <drawing .../>, <img ...>  (NOT <table> — has data)
-        if re.match(r"^<(drawing|img|image)\b", s, re.IGNORECASE):
+        # XML tag line: <drawing .../>, <img ...>, <table ...>
+        if re.match(r"^<(drawing|img|image|table)\b", s, re.IGNORECASE):
             continue
         # Figure/table caption line
         if re.match(r"^(图\s*\d|表\s*\d|Fig\.?\s*\d|Figure\s+\d|Table\s+\d)",
