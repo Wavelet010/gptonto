@@ -4397,10 +4397,11 @@ async def _expand_section_chunks(
     try:
         data = text_chunks_db._data
     except AttributeError:
+        logger.warning("section_recall: text_chunks_db._data not accessible")
         return chunks
 
     for cid, cdata in data.items():
-        if len(expanded_ids) >= max_expand:
+        if len(expanded_ids) - len(hit_ids) >= max_expand:
             break
         sec = cdata.get("section_id", "")
         if sec in target_sections:

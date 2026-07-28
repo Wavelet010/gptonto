@@ -31,6 +31,9 @@ services:
       - INPUT_DIR=/app/data/inputs
       - MILVUS_URI=http://milvus:19530
       - MILVUS_DB_NAME=lightrag
+      - SECTION_RECALL=true
+      - SECTION_RECALL_DEPTH=1
+      - SECTION_RECALL_MAX=20
     depends_on:
       milvus:
         condition: service_healthy

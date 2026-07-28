@@ -83,7 +83,8 @@
       "Bash(curl *)",
       "Bash(git -C /chenhs/rag add -A)",
       "Bash(git -C /chenhs/rag commit -m \"v11.2: fix variable ordering\")",
-      "Bash(git -C /chenhs/rag commit -m 'v12: S策略父子分段召回 *)"
+      "Bash(git -C /chenhs/rag commit -m 'v12: S策略父子分段召回 *)",
+      "Bash(git -C /chenhs/rag commit -m \"v12.1: fix max_expand counting \\(hit_ids shouldn't count against limit\\)\")"
     ]
   }
 }
