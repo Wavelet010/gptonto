@@ -928,6 +928,16 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
         global_config.pop("_addon_params_dirty", None)
         global_config.pop("_cached_entity_extraction_use_json", None)
         global_config["addon_params"] = dict(self._addon_params)
+        # Parent-child section recall (S strategy)
+        global_config["section_recall"] = (
+            os.getenv("SECTION_RECALL", "").lower() == "true"
+        )
+        global_config["section_recall_depth"] = int(
+            os.getenv("SECTION_RECALL_DEPTH", "1")
+        )
+        global_config["section_recall_max"] = int(
+            os.getenv("SECTION_RECALL_MAX", "20")
+        )
         # Inject runtime per-role wrapped LLM funcs (callable; not part of asdict
         # because they live in the private _role_llm_states map). The first
         # _build_global_config() call from __post_init__ runs before the role

@@ -4355,6 +4355,92 @@ async def _get_vector_context(
         return []
 
 
+async def _expand_section_chunks(
+    chunks: list[dict],
+    text_chunks_db: BaseKVStorage,
+    global_config: dict[str, Any],
+) -> list[dict]:
+    """Expand *chunks* by including sibling chunks that share the same
+    ``section_id`` (and optionally ``parent_section_id``).
+
+    Controlled by ``SECTION_RECALL`` / ``SECTION_RECALL_DEPTH`` /
+    ``SECTION_RECALL_MAX`` env vars.
+    """
+    if not global_config.get("section_recall"):
+        return chunks
+    if not text_chunks_db or not chunks:
+        return chunks
+
+    depth = global_config.get("section_recall_depth", 1)
+    max_expand = global_config.get("section_recall_max", 20)
+
+    # 1. Collect section_id / parent_section_id from hit chunks
+    hit_ids = {c.get("chunk_id") for c in chunks if c.get("chunk_id")}
+    target_sections: set[str] = set()
+    for chunk_id in hit_ids:
+        full = await text_chunks_db.get_by_id(chunk_id)
+        if not full:
+            continue
+        sid = full.get("section_id", "")
+        if sid:
+            target_sections.add(sid)
+        if depth >= 2:
+            pid = full.get("parent_section_id", "")
+            if pid:
+                target_sections.add(pid)
+
+    if not target_sections:
+        return chunks
+
+    # 2. Scan text_chunks for siblings
+    expanded_ids = set(hit_ids)
+    try:
+        data = text_chunks_db._data
+    except AttributeError:
+        return chunks
+
+    for cid, cdata in data.items():
+        if len(expanded_ids) >= max_expand:
+            break
+        sec = cdata.get("section_id", "")
+        if sec in target_sections:
+            expanded_ids.add(cid)
+        elif depth >= 2 and cdata.get("parent_section_id", "") in target_sections:
+            expanded_ids.add(cid)
+
+    if len(expanded_ids) <= len(hit_ids):
+        return chunks  # no expansion
+
+    # 3. Fetch full data for expanded IDs
+    expanded_list = await text_chunks_db.get_by_ids(list(expanded_ids))
+    if not expanded_list:
+        return chunks
+
+    # Sort by section_id → chunk_order_index
+    expanded_list.sort(key=lambda c: (
+        c.get("section_id", ""),
+        c.get("chunk_order_index", 0),
+    ))
+
+    # 4. Build result dicts
+    seen = set(hit_ids)
+    for cdata in expanded_list:
+        cid = cdata.get("_id") or cdata.get("id") or ""
+        if cid in seen:
+            continue
+        seen.add(cid)
+        chunk_with_metadata = {
+            "content": cdata.get("content", ""),
+            "created_at": cdata.get("created_at"),
+            "file_path": cdata.get("file_path", "unknown_source"),
+            "source_type": "section_recall",
+            "chunk_id": cid,
+        }
+        chunks.append(chunk_with_metadata)
+
+    return chunks
+
+
 async def _perform_kg_search(
     query: str,
     ll_keywords: str,
@@ -5825,6 +5911,9 @@ async def naive_query(
         return QueryResult(content=PROMPTS["fail_response"])
 
     chunks = await _get_vector_context(query, chunks_vdb, query_param, None)
+
+    # Parent-child section recall — expand with sibling chunks
+    chunks = await _expand_section_chunks(chunks, text_chunks_db, global_config)
 
     if chunks is None or len(chunks) == 0:
         logger.info(
