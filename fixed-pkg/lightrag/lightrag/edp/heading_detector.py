@@ -241,6 +241,13 @@ class HeadingDetector:
             if best_score > 0:
                 break  # matched on first attempt (original line)
 
+        # Guard: markdown heading whose text starts with '<' (e.g.
+        # # <drawing id="..."/> from docx parser) is an XML tag, not a
+        # real heading.
+        if best_reason == "markdown" and best_match:
+            if best_match.group(2).strip().startswith("<"):
+                return 0, 0, "", None
+
         return best_score, best_level, best_reason, best_match
 
     @classmethod

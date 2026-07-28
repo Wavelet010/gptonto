@@ -407,6 +407,9 @@ def _leaf_fallback_split(
 
     paragraphs = _split_by_paragraph(text)
     for para in paragraphs:
+        # Skip pure figure / drawing / caption lines — no retrievable text
+        if _is_figure_only(para):
+            continue
         p_tokens = _count_tokens(tokenizer, para)
         if p_tokens <= max_tokens:
             ch = _make_fallback_chunk(
@@ -554,6 +557,21 @@ def _split_by_paragraph(text: str) -> list[str]:
         if len(lines) > 1:
             return lines
     return [text]
+
+
+def _is_figure_only(text: str) -> bool:
+    """Return True if *text* contains only a figure/drawing reference."""
+    stripped = text.strip()
+    if not stripped:
+        return True
+    # XML self-closing or opening tag: <drawing .../>, <img ...>
+    if re.match(r"^<[a-zA-Z][^>]*(/>|>)$", stripped):
+        return True
+    # Figure/table caption without body text
+    if re.match(r"^(图\s*\d|表\s*\d|Fig\.?\s*\d|Figure\s+\d|Table\s+\d)",
+                stripped, re.IGNORECASE):
+        return True
+    return False
 
 
 def _split_by_sentence(text: str) -> list[str]:
