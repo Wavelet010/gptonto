@@ -4368,6 +4368,8 @@ async def _expand_section_chunks(
     """
     if not global_config.get("section_recall"):
         return chunks
+
+    logger.info("section_recall enabled: expanding %d chunks", len(chunks))
     if not text_chunks_db or not chunks:
         return chunks
 
@@ -4376,9 +4378,13 @@ async def _expand_section_chunks(
 
     # 1. Collect section_id / parent_section_id from hit chunks
     hit_ids = {c.get("chunk_id") for c in chunks if c.get("chunk_id")}
+    logger.info("section_recall: looking up %d hit_ids", len(hit_ids))
     target_sections: set[str] = set()
+    found = 0
     for chunk_id in hit_ids:
         full = await text_chunks_db.get_by_id(chunk_id)
+        if full:
+            found += 1
         if not full:
             continue
         sid = full.get("section_id", "")
@@ -4389,31 +4395,52 @@ async def _expand_section_chunks(
             if pid:
                 target_sections.add(pid)
 
+    logger.info(
+        "section_recall: found=%d target_sections=%d",
+        found, len(target_sections),
+    )
     if not target_sections:
         return chunks
 
-    # 2. Scan text_chunks for siblings
+    # 2. Scan text_chunks for siblings (use JSON file directly)
+    import json as _json_recall
+    import os as _os_recall
     expanded_ids = set(hit_ids)
     try:
-        data = text_chunks_db._data
-    except AttributeError:
-        logger.warning("section_recall: text_chunks_db._data not accessible")
+        # Get working dir from global config or try env var
+        working_dir = (
+            text_chunks_db.global_config.get("working_dir", "")
+            or global_config.get("working_dir", "")
+            or _os_recall.environ.get("WORKING_DIR", "/app/data/rag_storage")
+        )
+        chunks_file = _os_recall.path.join(working_dir, "kv_store_text_chunks.json")
+        logger.info("section_recall: reading %s (exists=%s)", chunks_file, _os_recall.path.exists(chunks_file))
+        if _os_recall.path.exists(chunks_file):
+            with open(chunks_file, "r", encoding="utf-8") as _f:
+                disk_data = _json_recall.load(_f)
+            for cid, cdata in disk_data.items():
+                if len(expanded_ids) - len(hit_ids) >= max_expand:
+                    break
+                sec = cdata.get("section_id", "")
+                if sec and sec in target_sections:
+                    expanded_ids.add(cid)
+                elif depth >= 2:
+                    pid = cdata.get("parent_section_id", "")
+                    if pid and pid in target_sections:
+                        expanded_ids.add(cid)
+        else:
+            return chunks
+    except Exception as e:
+        logger.warning("section_recall: expansion failed: %s", e)
         return chunks
 
-    for cid, cdata in data.items():
-        if len(expanded_ids) - len(hit_ids) >= max_expand:
-            break
-        sec = cdata.get("section_id", "")
-        if sec in target_sections:
-            expanded_ids.add(cid)
-        elif depth >= 2 and cdata.get("parent_section_id", "") in target_sections:
-            expanded_ids.add(cid)
-
-    if len(expanded_ids) <= len(hit_ids):
+    newly_added = len(expanded_ids) - len(hit_ids)
+    if newly_added <= 0:
         return chunks  # no expansion
 
     # 3. Fetch full data for expanded IDs
     expanded_list = await text_chunks_db.get_by_ids(list(expanded_ids))
+    logger.info("section_recall: fetched %d expanded chunks", len(expanded_list))
     if not expanded_list:
         return chunks
 
@@ -4425,8 +4452,11 @@ async def _expand_section_chunks(
 
     # 4. Build result dicts
     seen = set(hit_ids)
+    added = 0
     for cdata in expanded_list:
         cid = cdata.get("_id") or cdata.get("id") or ""
+        if not cid:
+            logger.warning("section_recall: chunk in expanded_list has no _id/id, keys=%s", list(cdata.keys())[:5])
         if cid in seen:
             continue
         seen.add(cid)
@@ -4438,7 +4468,9 @@ async def _expand_section_chunks(
             "chunk_id": cid,
         }
         chunks.append(chunk_with_metadata)
+        added += 1
 
+    logger.info("section_recall: added %d chunks to result", added)
     return chunks
 
 
