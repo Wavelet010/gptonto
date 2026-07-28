@@ -560,18 +560,23 @@ def _split_by_paragraph(text: str) -> list[str]:
 
 
 def _is_figure_only(text: str) -> bool:
-    """Return True if *text* contains only a figure/drawing reference."""
-    stripped = text.strip()
-    if not stripped:
-        return True
-    # XML self-closing or opening tag: <drawing .../>, <img ...>
-    if re.match(r"^<[a-zA-Z][^>]*(/>|>)$", stripped):
-        return True
-    # Figure/table caption without body text
-    if re.match(r"^(图\s*\d|表\s*\d|Fig\.?\s*\d|Figure\s+\d|Table\s+\d)",
-                stripped, re.IGNORECASE):
-        return True
-    return False
+    """Return True if *text* contains only figure/drawing references — no
+    retrievable text content."""
+    lines = text.strip().split("\n")
+    for line in lines:
+        s = line.strip()
+        if not s:
+            continue
+        # XML tag line: <drawing .../>, <img ...>
+        if re.match(r"^<[a-zA-Z]", s):
+            continue
+        # Figure/table caption line
+        if re.match(r"^(图\s*\d|表\s*\d|Fig\.?\s*\d|Figure\s+\d|Table\s+\d)",
+                    s, re.IGNORECASE):
+            continue
+        # Has real content → not figure-only
+        return False
+    return True  # all lines are figure lines or empty
 
 
 def _split_by_sentence(text: str) -> list[str]:
