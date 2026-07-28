@@ -2261,17 +2261,34 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
             return {"synced": 0, "fields": [], "message": "No chunks found"}
 
         # 2. Fetch chunks from Milvus (including $meta dynamic fields)
-        id_list = '", "'.join(chunk_ids)
+        # Batch queries to avoid hitting Milvus expression length limit (~64KB)
+        BATCH_SIZE = 500
+        rows: list[dict] = []
         try:
             self.chunks_vdb._ensure_collection_loaded()
-            rows = self.chunks_vdb._client.query(
-                collection_name=self.chunks_vdb.final_namespace,
-                filter=f'id in ["{id_list}"]',
-                output_fields=["*"],
-            )
         except Exception:
-            _log.warning("Failed to query Milvus for doc_id=%s", doc_id, exc_info=True)
-            rows = []
+            _log.warning("Failed to load Milvus collection for doc_id=%s", doc_id, exc_info=True)
+            return {"synced": 0, "fields": [], "message": "Failed to load Milvus collection"}
+
+        for i in range(0, len(chunk_ids), BATCH_SIZE):
+            batch_ids = chunk_ids[i:i + BATCH_SIZE]
+            id_list = '", "'.join(batch_ids)
+            try:
+                batch_rows = self.chunks_vdb._client.query(
+                    collection_name=self.chunks_vdb.final_namespace,
+                    filter=f'id in ["{id_list}"]',
+                    output_fields=["*"],
+                )
+                if batch_rows:
+                    rows.extend(batch_rows)
+            except Exception:
+                _log.warning(
+                    "Failed to query Milvus batch %d/%d for doc_id=%s",
+                    i // BATCH_SIZE + 1,
+                    (len(chunk_ids) + BATCH_SIZE - 1) // BATCH_SIZE,
+                    doc_id,
+                    exc_info=True,
+                )
         if not rows:
             return {"synced": 0, "fields": [], "message": "Milvus query returned no rows"}
 
