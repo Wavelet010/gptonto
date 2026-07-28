@@ -4401,9 +4401,14 @@ async def _expand_section_chunks(
         working_dir = (
             text_chunks_db.global_config.get("working_dir", "")
             or global_config.get("working_dir", "")
-            or _os_recall.environ.get("WORKING_DIR", "/app/data/rag_storage")
+            or _os_recall.environ.get("WORKING_DIR", "")
         )
-        chunks_file = _os_recall.path.join(working_dir, "kv_store_text_chunks.json")
+        if not working_dir:
+            return chunks
+        # Respect workspace isolation if configured
+        workspace = getattr(text_chunks_db, "workspace", None) or ""
+        ws_dir = _os_recall.path.join(working_dir, workspace) if workspace else working_dir
+        chunks_file = _os_recall.path.join(ws_dir, "kv_store_text_chunks.json")
         if _os_recall.path.exists(chunks_file):
             with open(chunks_file, "r", encoding="utf-8") as _f:
                 disk_data = _json_recall.load(_f)
@@ -4425,6 +4430,8 @@ async def _expand_section_chunks(
     newly_added = len(expanded_ids) - len(hit_ids)
     if newly_added <= 0:
         return chunks  # no expansion
+
+    logger.info("Section recall: expanded +%d sibling chunks", newly_added)
 
     # 3. Fetch full data for expanded IDs
     expanded_list = await text_chunks_db.get_by_ids(list(expanded_ids))
@@ -5929,12 +5936,14 @@ async def naive_query(
 
     # Parent-child section recall — expand with sibling chunks
     chunks = await _expand_section_chunks(chunks, text_chunks_db, global_config)
-    # Bump chunk_top_k so process_chunks_unified doesn't truncate
-    # the expanded siblings back down to the original limit.
+    # Avoid mutating the caller's query_param — bump chunk_top_k
+    # on a local copy so process_chunks_unified doesn't truncate
+    # the expanded siblings.
     if len(chunks) > (query_param.chunk_top_k or 0):
-        query_param.chunk_top_k = len(chunks)
+        from dataclasses import replace
+        query_param = replace(query_param, chunk_top_k=len(chunks))
 
-    if chunks is None or len(chunks) == 0:
+    if len(chunks) == 0:
         logger.info(
             "[naive_query] No relevant document chunks found; returning no-result."
         )
