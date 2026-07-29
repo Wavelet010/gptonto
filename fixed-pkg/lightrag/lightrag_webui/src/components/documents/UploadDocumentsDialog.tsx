@@ -263,6 +263,7 @@ export default function UploadDocumentsDialog({
         if (!open) {
           setProgresses({})
           setFileErrors({})
+          setSkipGraph(false)
         }
         setOpen(open)
       }}
