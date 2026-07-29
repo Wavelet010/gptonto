@@ -292,8 +292,6 @@ def _dfs_tree_split(
 
     # ---------- Case 1: fits → one chunk -----------------------------
     if token_count <= max_tokens:
-        if _is_figure_only(node.text):
-            return []  # pure figure/drawing section — no retrievable text
         ch = _make_chunk(node, node.text, split_type="section",
                          section_id=node.heading or "",
                          parent_section_id=parent_section_id)
@@ -310,9 +308,7 @@ def _dfs_tree_split(
         lead_text = node.text[:lead_end].strip()
         if lead_text:
             lead_tokens = _count_tokens(tokenizer, lead_text)
-            if _is_figure_only(lead_text):
-                pass  # skip pure figure/drawing leading text
-            elif lead_tokens <= max_tokens:
+            if lead_tokens <= max_tokens:
                 ch = _make_chunk(node, lead_text,
                                  split_type="section_lead",
                                  section_id=node.heading,
@@ -410,10 +406,27 @@ def _leaf_fallback_split(
     chunks: list[dict[str, Any]] = []
 
     paragraphs = _split_by_paragraph(text)
+    pending_figure = ""  # Buffer figure-only paragraphs at the start
+
     for para in paragraphs:
-        # Skip pure figure / drawing / caption lines — no retrievable text
+        # Figure / drawing / caption paragraph: merge into adjacent chunk
+        # instead of discarding — image resources may be loaded later by ID.
         if _is_figure_only(para):
+            if chunks:
+                # Merge into previous chunk
+                prev = chunks[-1]
+                prev["content"] = prev["content"] + "\n" + para
+                prev["tokens"] = _count_tokens(tokenizer, prev["content"])
+            else:
+                # No previous chunk yet — buffer for the next real paragraph
+                pending_figure = (pending_figure + "\n" + para).strip()
             continue
+
+        # Prepend any pending figure/drawing content to this paragraph
+        if pending_figure:
+            para = pending_figure + "\n" + para
+            pending_figure = ""
+
         p_tokens = _count_tokens(tokenizer, para)
         if p_tokens <= max_tokens:
             ch = _make_fallback_chunk(
@@ -452,6 +465,18 @@ def _leaf_fallback_split(
                     full_section_id=full_section_id,
                 )
                 chunks.append(ch)
+
+    # If the entire leaf section is figure-only (no real text paragraphs),
+    # still preserve the content — don't discard it.
+    if pending_figure and not chunks:
+        p_tokens = _count_tokens(tokenizer, pending_figure)
+        ch = _make_fallback_chunk(
+            pending_figure, p_tokens, "paragraph",
+            section_id, parent_section_id,
+            parent_headings=_parent_headings, level=level,
+            full_section_id=full_section_id,
+        )
+        chunks.append(ch)
 
     return chunks
 
