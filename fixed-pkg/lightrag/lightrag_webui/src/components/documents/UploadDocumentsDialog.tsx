@@ -42,6 +42,7 @@ export default function UploadDocumentsDialog({
   const [availableProfiles, setAvailableProfiles] = useState<string[]>([])
   const [profilesLoading, setProfilesLoading] = useState(false)
   const [chunkingParamsJson, setChunkingParamsJson] = useState('')
+  const [skipGraph, setSkipGraph] = useState(false)
 
   const handleRejectedFiles = useCallback(
     (rejectedFiles: FileRejection[]) => {
@@ -158,7 +159,8 @@ export default function UploadDocumentsDialog({
               }))
             },
               chunkingJson,
-              effectiveProfile
+              effectiveProfile,
+              skipGraph
             )
 
             if (result.status !== 'success') {
@@ -248,7 +250,7 @@ export default function UploadDocumentsDialog({
         setIsUploading(false)
       }
     },
-    [setIsUploading, setProgresses, setFileErrors, t, onDocumentsUploaded, onUploadBatchAccepted, chunkingStrategy, profileName, chunkingParamsJson]
+    [setIsUploading, setProgresses, setFileErrors, t, onDocumentsUploaded, onUploadBatchAccepted, chunkingStrategy, profileName, chunkingParamsJson, skipGraph]
   )
 
   return (
@@ -344,6 +346,20 @@ export default function UploadDocumentsDialog({
                 </>
               )}
             </select>
+          </div>
+
+          <div className="flex items-center gap-2 px-1">
+            <input
+              type="checkbox"
+              id="skip-graph-upload"
+              checked={skipGraph}
+              onChange={(e) => setSkipGraph(e.target.checked)}
+              disabled={isUploading}
+              className="h-4 w-4"
+            />
+            <label htmlFor="skip-graph-upload" className="text-sm cursor-pointer select-none">
+              {t('documentPanel.uploadDocuments.skipGraph')}
+            </label>
           </div>
         </div>
 

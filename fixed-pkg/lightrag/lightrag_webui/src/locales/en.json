@@ -118,6 +118,7 @@
       "invalidParamsJson": "Invalid params JSON",
       "parserProfile": "Parser Profile",
       "profileRequired": "A parser profile is required for the S strategy",
+      "skipGraph": "Skip graph generation (no entity/relation extraction, only chunking and vectorization)",
       "strategy": {
         "fixed_token": "Fixed Token",
         "recursive_character": "Recursive Character",

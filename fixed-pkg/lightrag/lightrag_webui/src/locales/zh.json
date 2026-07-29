@@ -118,6 +118,7 @@
       "invalidParamsJson": "分段参数 JSON 格式错误",
       "parserProfile": "解析模板",
       "profileRequired": "S策略需要选择解析模板",
+      "skipGraph": "跳过图谱生成（不提取实体和关系，仅分段和向量化）",
       "strategy": {
         "fixed_token": "固定Token",
         "recursive_character": "递归字符",

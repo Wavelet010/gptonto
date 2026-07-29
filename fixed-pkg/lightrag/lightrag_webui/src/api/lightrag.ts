@@ -903,12 +903,14 @@ export const uploadDocument = async (
   file: File,
   onUploadProgress?: (percentCompleted: number) => void,
   chunking?: string,
-  profile?: string
+  profile?: string,
+  skipGraph?: boolean
 ): Promise<DocActionResponse> => {
   const formData = new FormData()
   formData.append('file', file)
   if (chunking) formData.append('chunking', chunking)
   if (profile) formData.append('profile', profile)
+  if (skipGraph) formData.append('skip_graph', 'true')
 
   const response = await axiosInstance.post('/documents/upload', formData, {
     headers: {
