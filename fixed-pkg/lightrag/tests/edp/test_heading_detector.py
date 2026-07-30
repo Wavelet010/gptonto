@@ -26,7 +26,7 @@ def test_chinese_h2_full():
 def test_chinese_h2_half():
     hds = _detect(["(1) X波段", "正文"])
     assert len(hds) == 1
-    assert hds[0].level == 2
+    assert hds[0].level == 4  # chinese_h2_half default level
     assert hds[0].text == "X波段"
 
 
@@ -52,21 +52,21 @@ def test_article():
 def test_decimal_h1():
     hds = _detect(["1. 概述", "正文"])
     assert len(hds) == 1
-    assert hds[0].level == 2
+    assert hds[0].level == 3  # decimal: dots(0) + 3
     assert hds[0].text == "概述"
 
 
 def test_decimal_h2():
     hds = _detect(["1.1 模块设计", "正文"])
     assert len(hds) == 1
-    assert hds[0].level == 3
+    assert hds[0].level == 4  # decimal: dots(1) + 3
     assert hds[0].text == "模块设计"
 
 
 def test_decimal_h3():
     hds = _detect(["1.1.1 参数配置", "正文"])
     assert len(hds) == 1
-    assert hds[0].level == 4
+    assert hds[0].level == 5  # decimal: dots(2) + 3
 
 
 def test_markdown_h1():

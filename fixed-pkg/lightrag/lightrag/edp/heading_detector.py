@@ -223,10 +223,27 @@ class HeadingDetector:
         best_reason = ""
         best_match = None
 
-        for line_to_try in (line, line.lstrip("#")):
+        for line_to_try in (line, line.lstrip("#").lstrip()):
+            # On the original (non-stripped) line, check whether any
+            # Chinese / numbered heading pattern matches.  If one does,
+            # skip the markdown pattern — the Chinese numbering carries
+            # more semantic information about the intended level than the
+            # raw ``#`` count (which may just be an artifact of docx→md
+            # conversion).
+            non_md_matches = False
+            if line_to_try == line:
+                stripped = line.lstrip("#").lstrip()
+                if stripped != line:
+                    for p, _, _, t in cls._PATTERNS:
+                        if t != "markdown" and p.match(stripped):
+                            non_md_matches = True
+                            break
+
             for pattern, default_level, base_score, tag in cls._PATTERNS:
                 if tag == "markdown" and line_to_try != line:
                     continue  # skip md pattern on stripped fallback
+                if tag == "markdown" and non_md_matches:
+                    continue  # Chinese/numbered pattern takes priority
                 m = pattern.match(line_to_try)
                 if not m:
                     continue
