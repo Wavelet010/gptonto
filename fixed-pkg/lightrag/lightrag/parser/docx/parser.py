@@ -23,7 +23,7 @@ class NativeDocxParser(NativeParserBase):
     """
 
     engine_name = PARSER_ENGINE_NATIVE
-    sidecar_path_style = "basename_only"  # legacy native docx convention
+    sidecar_path_style = "with_prefix"  # full path so drawing tags carry URL-ready path
     empty_content_label = "DOCX"
 
     def validate_source(self, source: Path, file_path: str) -> None:
