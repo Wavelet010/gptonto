@@ -163,6 +163,7 @@ local:  ll_keywords → 搜实体 → 遍历关系图 → 拉邻居实体和关�
 |--------|------|------|
 | `query_data` | string | `{{节点1.body}}` |
 | `user_query` | string | `{{开始.query}}` |
+| `lightrag_url` | string | LightRAG 服务地址，如 `http://192.168.1.100:9621`（可选；留空时本地图片以 `> 📷 图片: ...` 文本占位显示） |
 | `response_type` | string | 固定值 `"Multiple Paragraphs"` 或由用户选择 |
 
 ### 输出变量
@@ -207,8 +208,10 @@ def main(query_data: str, user_query: str, lightrag_url: str = "", response_type
     has_kg = len(entities) > 0 or len(relationships) > 0
 
     # ===== 图片标签转换 =====
-    # 将 chunk 中的 <drawing path="xxx.png" /> 转为 Markdown 图片链接
-    # URL 格式: /assets/<doc_id>.blocks.assets/<path>
+    # 将 chunk 中的 <drawing path="<base>.blocks.assets/xxx.png" /> 转为 Markdown 图片链接。
+    # 服务器将 /assets/<base>.blocks.assets/<file> 解析到
+    # <input_dir>/__parsed__/<fullname>.parsed/<base>.blocks.assets/<file>，
+    # 因此本地图片 URL 格式为: /assets/<base>.blocks.assets/<file>
     def _convert_drawing_tags(text: str) -> str:
         def _replace_drawing(m):
             attrs = m.group(0)
@@ -217,9 +220,16 @@ def main(query_data: str, user_query: str, lightrag_url: str = "", response_type
             id_m = re.search(r'id="([^"]*)"', attrs)
             img_path = path_m.group(1) if path_m else ""
             alt = id_m.group(1) if id_m else "图片"
-            if img_path and lightrag_url:
-                return f"\n![{alt}]({lightrag_url.rstrip('/')}/assets/{img_path})\n"
-            elif img_path:
+            if img_path:
+                # 本地 sidecar 图片: path="<base>.blocks.assets/<file>"
+                if ".blocks.assets/" in img_path and lightrag_url:
+                    url = f"{lightrag_url.rstrip('/')}/assets/{img_path}"
+                    return f"\n![{alt}]({url})\n"
+                # 外部链接（http/https）原样作为图片地址
+                if img_path.startswith(("http://", "https://")):
+                    return f"\n![{alt}]({img_path})\n"
+                # 无法解析为本地路径（如 docx 旧版 basename-only 风格
+                # path="image1.png"）→ 文本占位
                 return f"\n> 📷 图片: {img_path}\n"
             return f"\n> 📷 {alt}\n"
         return re.sub(r"<drawing\b[^>]*/>", _replace_drawing, text)

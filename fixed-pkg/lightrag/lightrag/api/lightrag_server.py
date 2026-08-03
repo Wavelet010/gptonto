@@ -16,6 +16,7 @@ import logging
 import logging.config
 import sys
 import textwrap
+import threading
 import uvicorn
 import pipmaster as pm
 from typing import Any
@@ -2520,14 +2521,113 @@ def create_app(args):
             name="swagger-ui-static",
         )
 
-    # Mount sidecar assets directory so images extracted from documents
-    # can be served directly via HTTP (e.g. for Dify or other frontends).
-    # URL pattern: /assets/<doc_id>.blocks.assets/<image_file>
-    assets_dir = Path(args.working_dir)
+    # Mount sidecar assets so images extracted from documents can be served
+    # directly via HTTP (e.g. for Dify or other frontends).
+    #
+    # The pipeline writes parsed sidecars under
+    # ``<input_dir>/__parsed__/<fullname>.parsed/`` and extracted images land
+    # in the ``<base>.blocks.assets/`` sub-directory of that parsed dir (see
+    # ``lightrag.parser.native_base`` / ``lightrag.sidecar.writer``).  The
+    # parsed dir is named after the full source filename (``xxx.docx.parsed``)
+    # while the ``<drawing path>`` attribute in chunk content only carries the
+    # document stem (``<base>.blocks.assets/<file>``), so the exact directory
+    # cannot be derived from the attribute alone — we resolve it by scanning
+    # the ``*.parsed`` directories.
+    #
+    # URL pattern: /assets/<base>.blocks.assets/<image_file>
+    # Only files under a ``<base>.blocks.assets/`` directory are served; the
+    # kv-store JSON files of ``working_dir``, archived source documents and
+    # sidecar JSONs under ``__parsed__/`` are NOT exposed.
+    class SidecarAssetsStaticFiles(StaticFiles):
+        """Serve only ``<base>.blocks.assets/<file>`` entries found under the
+        parsed-artifact roots."""
+
+        _REL_PATH_RE = re.compile(r"^[^/]+\.blocks\.assets/[^/]+$")
+
+        def __init__(self, parsed_roots: list[Path], **kwargs) -> None:
+            super().__init__(**kwargs)
+            self.parsed_roots = [Path(p) for p in parsed_roots]
+            # Maps ``<base>.blocks.assets`` -> list of parsed dirs containing
+            # an entry with that name (built lazily, refreshed on miss).
+            self._dir_index: dict[str, list[Path]] = {}
+            self._index_lock = threading.Lock()
+
+        def _scan(self) -> None:
+            roots: list[Path] = []
+            for root in self.parsed_roots:
+                if not root.is_dir():
+                    continue
+                roots.append(root)
+                # Workspace-scoped parsed dirs: <input_dir>/<workspace>/__parsed__
+                try:
+                    for sub in root.parent.iterdir():
+                        if sub.is_dir() and (sub / "__parsed__").is_dir():
+                            roots.append(sub / "__parsed__")
+                except OSError:
+                    pass
+            index: dict[str, list[Path]] = {}
+            for root in roots:
+                try:
+                    entries = list(os.scandir(root))
+                except OSError:
+                    continue
+                for entry in entries:
+                    if not entry.is_dir() or not entry.name.endswith(".parsed"):
+                        continue
+                    try:
+                        for child in os.scandir(entry.path):
+                            if child.is_dir() and child.name.endswith(
+                                ".blocks.assets"
+                            ):
+                                index.setdefault(child.name, []).append(
+                                    Path(child.path)
+                                )
+                    except OSError:
+                        continue
+            with self._index_lock:
+                self._dir_index = index
+
+        def _resolve(self, path: str) -> Path | None:
+            asset_dir_name, _, filename = path.partition("/")
+            with self._index_lock:
+                parsed_dirs = self._dir_index.get(asset_dir_name)
+            if parsed_dirs is None:
+                self._scan()
+                with self._index_lock:
+                    parsed_dirs = self._dir_index.get(asset_dir_name)
+            if not parsed_dirs:
+                return None
+            for assets_dir in parsed_dirs:
+                candidate = assets_dir / filename
+                if candidate.is_file():
+                    return candidate
+            return None
+
+        def lookup_path(self, path: str) -> tuple[str, os.stat_result | None]:
+            path = path.lstrip("/")
+            if not self._REL_PATH_RE.match(path):
+                return None, None
+            resolved = self._resolve(path)
+            if resolved is None:
+                return None, None
+            try:
+                return str(resolved), resolved.stat()
+            except OSError:
+                return None, None
+
+    assets_dir = Path(args.input_dir) / "__parsed__"
+    env_input_dir = os.getenv("INPUT_DIR", "").strip()
+    if env_input_dir and env_input_dir != str(args.input_dir):
+        # The pipeline resolves the parsed root via ``configured_input_dir()``
+        # (env ``INPUT_DIR`` or cwd/inputs); honour that override too.
+        assets_dir = Path(env_input_dir) / "__parsed__"
     if assets_dir.exists():
         app.mount(
             "/assets",
-            StaticFiles(directory=str(assets_dir)),
+            SidecarAssetsStaticFiles(
+                parsed_roots=[assets_dir],
+                directory=str(assets_dir),
+            ),
             name="sidecar-assets",
         )
 
