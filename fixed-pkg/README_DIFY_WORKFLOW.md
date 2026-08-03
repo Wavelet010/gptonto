@@ -177,12 +177,20 @@ local:  ll_keywords → 搜实体 → 遍历关系图 → 拉邻居实体和关�
 
 ```python
 import json
+import re
 
 
-def main(query_data: str, user_query: str, response_type: str = "Multiple Paragraphs") -> dict:
+def main(query_data: str, user_query: str, lightrag_url: str = "", response_type: str = "Multiple Paragraphs") -> dict:
     """
     参照 LightRAG prompt.py 原始模板，将 /query/data 返回的检索结果
     拼装为 LLM 可用的 System Prompt。支持 naive / mix / local 三种模式。
+
+    参数:
+        query_data:   /query/data 返回的完整 JSON
+        user_query:   用户问题
+        lightrag_url: LightRAG 服务地址，如 http://192.168.1.100:9621
+                      用于将 <drawing> 标签转为可访问的图片 URL
+        response_type: 回答格式
     """
     # ===== 解析 =====
     if isinstance(query_data, str):
@@ -198,13 +206,31 @@ def main(query_data: str, user_query: str, response_type: str = "Multiple Paragr
     mode = data.get("metadata", {}).get("query_mode", "naive")
     has_kg = len(entities) > 0 or len(relationships) > 0
 
+    # ===== 图片标签转换 =====
+    # 将 chunk 中的 <drawing path="xxx.png" /> 转为 Markdown 图片链接
+    # URL 格式: /assets/<doc_id>.blocks.assets/<path>
+    def _convert_drawing_tags(text: str) -> str:
+        def _replace_drawing(m):
+            attrs = m.group(0)
+            # 提取 id 和 path
+            path_m = re.search(r'path="([^"]*)"', attrs)
+            id_m = re.search(r'id="([^"]*)"', attrs)
+            img_path = path_m.group(1) if path_m else ""
+            alt = id_m.group(1) if id_m else "图片"
+            if img_path and lightrag_url:
+                return f"\n![{alt}]({lightrag_url.rstrip('/')}/assets/{img_path})\n"
+            elif img_path:
+                return f"\n> 📷 图片: {img_path}\n"
+            return f"\n> 📷 {alt}\n"
+        return re.sub(r"<drawing\b[^>]*/>", _replace_drawing, text)
+
     # ===== 拼 chunks 上下文 =====
     # 对应 prompt.py 的 naive_query_context / kg_query_context 模板
     chunk_entries = []
     for chunk in chunks:
         entry = {
             "reference_id": chunk.get("reference_id", ""),
-            "content": chunk.get("content", ""),
+            "content": _convert_drawing_tags(chunk.get("content", "")),
         }
         # content_headings: 标题面包屑，帮助 LLM 理解上下文
         if chunk.get("content_headings"):

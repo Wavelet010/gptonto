@@ -2520,6 +2520,17 @@ def create_app(args):
             name="swagger-ui-static",
         )
 
+    # Mount sidecar assets directory so images extracted from documents
+    # can be served directly via HTTP (e.g. for Dify or other frontends).
+    # URL pattern: /assets/<doc_id>.blocks.assets/<image_file>
+    assets_dir = Path(args.working_dir)
+    if assets_dir.exists():
+        app.mount(
+            "/assets",
+            StaticFiles(directory=str(assets_dir)),
+            name="sidecar-assets",
+        )
+
     # Conditionally mount WebUI only if assets exist
     if webui_assets_exist:
         static_dir = Path(__file__).parent / "webui"
