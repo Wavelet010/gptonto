@@ -69,6 +69,10 @@ export default function SiteHeader() {
     ? t('header.frontendNeedsRebuild')
     : versionDisplay ? `v${versionDisplay}` : '';
 
+  // 浏览器标签页标题
+  const pageTitle = webuiTitle || SiteInfo.name
+  document.title = pageTitle
+
   const handleLogout = () => {
     navigationService.navigateToLogin();
   }
@@ -80,14 +84,14 @@ export default function SiteHeader() {
           <ZapIcon className="size-4 text-emerald-400" aria-hidden="true" />
           <span className="font-bold md:inline-block">{webuiTitle || SiteInfo.name}</span>
         </a>
-        {webuiTitle && (
+        {webuiDescription && (
           <div className="flex items-center">
             <span className="mx-1 text-xs text-gray-500 dark:text-gray-400">|</span>
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="font-medium text-sm cursor-default">
-                    {webuiTitle}
+                    {webuiDescription}
                   </span>
                 </TooltipTrigger>
                 {webuiDescription && (
