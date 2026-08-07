@@ -78,7 +78,7 @@ export default function SiteHeader() {
       <div className="min-w-[200px] w-auto flex items-center">
         <a href={webuiPrefix} className="flex items-center gap-2">
           <ZapIcon className="size-4 text-emerald-400" aria-hidden="true" />
-          <span className="font-bold md:inline-block">{SiteInfo.name}</span>
+          <span className="font-bold md:inline-block">{webuiTitle || SiteInfo.name}</span>
         </a>
         {webuiTitle && (
           <div className="flex items-center">
@@ -126,11 +126,13 @@ export default function SiteHeader() {
               </Tooltip>
             </TooltipProvider>
           )}
-          <Button variant="ghost" size="icon" side="bottom" tooltip={t('header.projectRepository')}>
-            <a href={SiteInfo.github} target="_blank" rel="noopener noreferrer">
-              <GithubIcon className="size-4" />
-            </a>
-          </Button>
+          {SiteInfo.github && (
+            <Button variant="ghost" size="icon" side="bottom" tooltip={t('header.projectRepository')}>
+              <a href={SiteInfo.github} target="_blank" rel="noopener noreferrer">
+                <GithubIcon className="size-4" />
+              </a>
+            </Button>
+          )}
           <AppSettings />
           {!isGuestMode && (
             <Button

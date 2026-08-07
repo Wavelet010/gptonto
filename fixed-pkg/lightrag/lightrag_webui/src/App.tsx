@@ -21,6 +21,7 @@ import { Tabs, TabsContent } from '@/components/ui/Tabs'
 function App() {
   const message = useBackendState.use.message()
   const enableHealthCheck = useSettingsStore.use.enableHealthCheck()
+  const webuiTitle = useAuthStore.use.webuiTitle()
   const currentTab = useSettingsStore.use.currentTab()
   const [apiKeyAlertOpen, setApiKeyAlertOpen] = useState(false)
   const [initializing, setInitializing] = useState(true) // Add initializing state
@@ -175,7 +176,7 @@ function App() {
               <div className="min-w-[200px] w-auto flex items-center">
                 <a href={webuiPrefix} className="flex items-center gap-2">
                   <ZapIcon className="size-4 text-emerald-400" aria-hidden="true" />
-                  <span className="font-bold md:inline-block">{SiteInfo.name}</span>
+                  <span className="font-bold md:inline-block">{webuiTitle || SiteInfo.name}</span>
                 </a>
               </div>
 
