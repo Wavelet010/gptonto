@@ -21,7 +21,7 @@ import { Tabs, TabsContent } from '@/components/ui/Tabs'
 function App() {
   const message = useBackendState.use.message()
   const enableHealthCheck = useSettingsStore.use.enableHealthCheck()
-  const webuiTitle = useAuthStore.use.webuiTitle()
+  const { webuiTitle } = useAuthStore()
   const currentTab = useSettingsStore.use.currentTab()
   const [apiKeyAlertOpen, setApiKeyAlertOpen] = useState(false)
   const [initializing, setInitializing] = useState(true) // Add initializing state
