@@ -427,7 +427,7 @@ fixed-pkg/
 ├── README_DEPLOY.md          # 本文件
 ├── .env                      # 环境变量配置
 ├── docker-compose.deploy.yml # Docker Compose 部署配置
-├── Dockerfile.arm            # ARM64 镜像构建文件
+├── Dockerfile            # ARM64 镜像构建文件
 ├── deploy.sh                 # 首次部署脚本
 ├── update.sh                 # 源码更新脚本
 ├── restart.sh                # 重启 LightRAG

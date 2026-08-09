@@ -1,5 +1,7 @@
-# LightRAG-EDP ARM64 / Podman 兼容构建
-# 用法: podman build -f Dockerfile.arm -t lightrag-base:latest .
+# LightRAG-EDP 多架构构建 (x86_64 / ARM64)
+# 用法:
+#   docker build -t lightrag-base:latest .
+#   podman  build -t lightrag-base:latest .
 
 # ---- 前端构建 (node + npm) ----
 FROM docker.io/node:20-alpine AS frontend-builder
@@ -19,7 +21,7 @@ RUN apt-get update \
         curl build-essential pkg-config gosu \
     && rm -rf /var/lib/apt/lists/*
 
-# Rust (pymilvus 等包编译需要)
+# Rust (pymilvus 等包编译需要，自动适配当前架构)
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
