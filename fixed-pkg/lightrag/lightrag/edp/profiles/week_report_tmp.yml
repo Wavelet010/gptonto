@@ -1,4 +1,4 @@
-profile_name: day_report
+profile_name: week_report
 
 # Override heading levels per pattern.
 # Tags: chinese_h1, chinese_h2_full, chinese_h2_half, chapter_section, decimal_base
@@ -24,10 +24,9 @@ context_builder:
   enabled: true
   mode: compact                # rich | compact | raw
   compact_fields:             # compact 模式用哪些字段拼 embedding_text
-    - title
-    - heading_path
-    - knowledge_type
-    - doc_type
+    #- heading_path
+      #- knowledge_type
+      #- doc_type
     - summary
     # - keywords
     # - target

@@ -30,7 +30,7 @@ WORKDIR /app
 # pip 安装（从本地源码安装所有依赖）
 COPY pyproject.toml setup.py uv.lock ./
 COPY lightrag/ ./lightrag/
-RUN pip install --no-cache-dir ".[api,offline]"
+RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple ".[api,offline]"
 
 # 前端静态文件
 COPY --from=frontend-builder /app/lightrag/api/webui ./lightrag/api/webui

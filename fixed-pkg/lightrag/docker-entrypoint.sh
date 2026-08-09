@@ -23,7 +23,7 @@ if [ "$(id -u)" = "0" ]; then
     _pkg="/usr/local/lib/python3.12/site-packages/lightrag"
     if [ -d /app/lightrag/lightrag ]; then
         # Python source — subdirectories (rm+cp = rsync --delete equivalent)
-        for _sub in api edp kg parser; do
+        for _sub in api chunker edp evaluation kg llm parser sidecar tools; do
             if [ -d /app/lightrag/lightrag/"$_sub" ]; then
                 rm -rf "$_pkg/$_sub" 2>/dev/null || true
                 cp -r /app/lightrag/lightrag/"$_sub" "$_pkg/" 2>/dev/null || true
@@ -33,8 +33,9 @@ if [ "$(id -u)" = "0" ]; then
         if [ -d /app/lightrag/lightrag ]; then
             cp /app/lightrag/lightrag/*.py "$_pkg/" 2>/dev/null || true
         fi
-        # EDP profiles
+        # EDP profiles — clean + sync so deleted profiles disappear
         if [ -d /app/lightrag/lightrag/edp/profiles ]; then
+            rm -rf "$_pkg/edp/profiles" 2>/dev/null || true
             mkdir -p "$_pkg/edp/profiles"
             cp -r /app/lightrag/lightrag/edp/profiles/* "$_pkg/edp/profiles/" 2>/dev/null || true
         fi
