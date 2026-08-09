@@ -1,11 +1,15 @@
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
-if command -v podman &>/dev/null; then
-  RUNTIME="podman-compose"
-  command -v podman-compose &>/dev/null || RUNTIME="podman compose"
+
+if docker compose version &>/dev/null 2>&1; then
+  COMPOSE="docker compose"
+elif command -v docker-compose &>/dev/null; then
+  COMPOSE="docker-compose"
 else
-  RUNTIME="docker compose"
+  echo "错误: 未找到 docker compose"
+  exit 1
 fi
-echo "停止服务..."
-$RUNTIME -f "$DIR/docker-compose.deploy.yml" down
+
+echo "停止所有服务..."
+$COMPOSE -f "$DIR/docker-compose.deploy.yml" down
 echo "已停止"

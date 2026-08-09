@@ -2,42 +2,40 @@
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# 自动检测 docker 还是 podman
-if command -v podman &>/dev/null; then
-  RUNTIME="podman"
-  COMPOSE="podman-compose"
-  command -v podman-compose &>/dev/null || COMPOSE="podman compose"
-else
-  RUNTIME="docker"
+# 自动检测 docker compose 的调用方式
+# Docker Compose v2: "docker compose"
+# Docker Compose v1: "docker-compose"
+if docker compose version &>/dev/null 2>&1; then
   COMPOSE="docker compose"
+elif command -v docker-compose &>/dev/null; then
+  COMPOSE="docker-compose"
+else
+  echo "错误: 未找到 docker compose 或 docker-compose 命令"
+  exit 1
 fi
 
-echo "=== 检测到: $RUNTIME ==="
+echo "=== 使用: $COMPOSE ==="
 echo ""
 
-# 加载镜像
-echo "=== 1/3 加载镜像 ==="
-for f in "$DIR/images"/*.tar; do
+# 加载离线镜像（如果有 images 目录且非空）
+if ls "$DIR/images"/*.tar &>/dev/null 2>&1; then
+  echo "=== 1/3 加载离线镜像 ==="
+  for f in "$DIR/images"/*.tar; do
     echo "  $(basename "$f")..."
-    $RUNTIME load -i "$f"
-done
+    docker load -i "$f"
+  done
+  echo ""
+  OFFLINE=1
+else
+  echo "=== 1/3 跳过镜像加载（在线模式） ==="
+  echo ""
+  OFFLINE=0
+fi
 
-# 检查关键镜像是否已正确 tag（离线环境无法拉取）
-echo ""
-echo "=== 镜像检查 ==="
-for _img in lightrag-base:latest milvusdb/milvus:v2.5.9 quay.io/coreos/etcd:v3.5.18 minio/minio:latest zilliz/attu:latest; do
-    if $RUNTIME image inspect "$_img" >/dev/null 2>&1; then
-        echo "  ✓ $_img"
-    else
-        echo "  ✗ $_img 未找到或未标记! 离线部署将失败"
-        exit 1
-    fi
-done
-
-# 创建目录
-echo ""
+# 创建数据目录
 echo "=== 2/3 创建数据目录 ==="
-mkdir -p "$DIR/data/rag_storage" "$DIR/data/inputs" "$DIR/data/milvus" "$DIR/data/etcd" "$DIR/data/minio" "$DIR/data/tiktoken"
+mkdir -p "$DIR/data/rag_storage" "$DIR/data/inputs" "$DIR/data/milvus" "$DIR/data/etcd" "$DIR/data/minio" "$DIR/data/tiktoken" "$DIR/data/milvus-tmp"
+echo "  完成"
 
 # 启动
 echo ""
