@@ -22,6 +22,7 @@ services:
       - ./data/rag_storage:/app/data/rag_storage
       - ./data/inputs:/app/data/inputs
       - ./data/tiktoken:/app/data/tiktoken    # tiktoken 离线缓存
+      - ./data/prompts/entity_type:/app/data/prompts/entity_type
       - ./lightrag:/app/lightrag:ro          # 源码（只读，更新后重启）
       - ./.env:/app/.env:ro
     environment:
@@ -129,7 +130,7 @@ services:
       - MILVUS_URL=milvus:19530
     depends_on:
       - milvus
-    restart: unless-stopped
+    restart: always
     networks:
       - lightrag-net
 
