@@ -20,3 +20,6 @@ __pycache__/
 
 # Claude
 .claude/plans/
+fixed-pkg/lightrag/lightrag/edp/profiles/general.yml
+fixed-pkg/lightrag/lightrag/edp/profiles/week_report.yml
+fixed-pkg/data/prompts/entity_type/
