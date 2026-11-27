@@ -82,3 +82,78 @@ def test_storage_provenance_and_delete(tmp_path):
     assert len(store.export()["entities"])==2
     store.delete_document(d2)
     assert store.export()=={"entities":[],"relationships":[]}
+
+
+
+def test_duplicate_local_ids_never_bind_relationships():
+    schema,raw=fixture()
+    raw["entities"].append({**raw["entities"][0],"name":"另一个设备"})
+    result=validate(raw,schema,TEXT)
+    assert [e["local_id"] for e in result["entities"]]==["b"]
+    assert not result["relationships"] and result["errors"]
+
+
+def test_retry_failure_keeps_prior_facts(tmp_path):
+    schema,raw=fixture()
+    store=Store(tmp_path/"retry.sqlite3")
+    o=store.resource("ontology","设备",TTL,schema)
+    m=store.resource("prompt","设备","prompt",{"description":"设备"})
+    p=store.profile("设备",o,m)
+    profiles=store.profiles(True)
+    good={"chunk":{"content":TEXT},"routes":[{"id":p}],"errors":[],
+          "extractions":[{"profile_id":p,**validate(raw,schema,TEXT)}]}
+    bad={"chunk":{"content":TEXT},"routes":[],"errors":["model failed"],"extractions":[]}
+    d=store.new_document("a.txt",TEXT.encode(),{},profiles)
+    store.commit(d,[good],profiles)
+    before=store.export()
+    store.commit_retry(d,[good],{0:bad},profiles)
+    assert store.export()==before
+    assert store.chunks(d)[0]["last_retry"]["errors"]
+    old,failed=store.retry_input(d)
+    assert failed==[0]
+    store.commit_retry(d,old,{0:good},profiles)
+    assert store.chunks(d)[0]["last_retry"] is None
+    assert store.documents()[0]["status"]=="COMPLETED"
+
+
+def test_cross_ontology_imports_and_rdf_export(tmp_path):
+    from rdflib import Graph, URIRef, RDF
+    from lightrag.ontology.exporter import rdf_turtle
+    dep="""@prefix owl: <http://www.w3.org/2002/07/owl#> .
+    <https://example.org/space> a owl:Ontology .
+    <https://example.org/space#Zone> a owl:Class ."""
+    root="""@prefix owl: <http://www.w3.org/2002/07/owl#> .
+    @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+    <https://example.org/device> a owl:Ontology ; owl:imports <https://example.org/space> .
+    <https://example.org/device#Device> a owl:Class .
+    <https://example.org/device#locatedIn> a owl:ObjectProperty ;
+      rdfs:domain <https://example.org/device#Device> ; rdfs:range <https://example.org/space#Zone> ."""
+    with pytest.raises(ValueError,match="Missing local"):
+        compile_ttl(root)
+    schema=compile_ttl(root,[dep])
+    rel=EX+"locatedIn"
+    assert schema["relationships"][rel]["range"]==["https://example.org/space#Zone"]
+    data={"entities":[{"id":"a","class_uri":EX+"Device","name":"设备","attributes":[]},
+                      {"id":"b","class_uri":"https://example.org/space#Zone","name":"区域","attributes":[]}],
+          "relationships":[{"source":"a","target":"b","predicate_uri":rel}]}
+    graph=Graph().parse(data=rdf_turtle(data),format="turtle")
+    assert (URIRef("urn:gptonto:instance:a"),URIRef(rel),URIRef("urn:gptonto:instance:b")) in graph
+    assert (URIRef("urn:gptonto:instance:a"),RDF.type,URIRef(EX+"Device")) in graph
+
+
+def test_heading_exact_source_and_no_measurement_boundary():
+    # Character tokenizer makes the boundary test independent of network cache.
+    class Tok:
+        def encode(self,text): return list(text)
+    text="一、设备\n型号甲乙丙丁，电量88%。\n31.5 ℃\n二、状态\n运行正常。"
+    chunks=heading_chunks(Tok(),text,10)
+    assert all(c["content"]==text[c["_source_span"]["start"]:c["_source_span"]["end"]] for c in chunks)
+    assert all(c["tokens"]<=10 for c in chunks)
+    assert all(c["heading_path"] in (["一、设备"],["二、状态"]) for c in chunks)
+    assert "".join(c["content"] for c in chunks).replace("\n","")==text.replace("\n","")
+
+
+def test_json_rejects_overflow():
+    from lightrag.ontology.engine import parse_json
+    with pytest.raises(ValueError):
+        parse_json('{"value":1e999}')

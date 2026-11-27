@@ -92,7 +92,7 @@ def typed_value(value, datatype):
             and (kind != "int" or -(2**31) <= value < 2**31)
             and (kind != "long" or -(2**63) <= value < 2**63))
     if kind in {"decimal", "double", "float"}:
-        return type(value) in (int, float) and math.isfinite(value)
+        return (type(value) is int or type(value) is float and math.isfinite(value))
     if not isinstance(value, str):
         return False
     try:

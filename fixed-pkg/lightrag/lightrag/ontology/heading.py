@@ -12,7 +12,6 @@ PATTERNS = [
 ]
 
 def heading_chunks(tokenizer, content, size, *, depth=1, formats=None, number_base=None):
-    from lightrag.chunker import chunking_by_fixed_token
     if size < 1 or not 1 <= depth <= 6:
         raise ValueError("Invalid heading depth or token size")
     allowed = set(formats) if formats is not None else {p[0] for p in PATTERNS}
@@ -68,12 +67,49 @@ def heading_chunks(tokenizer, content, size, *, depth=1, formats=None, number_ba
         body = content[start:end]
         if not body.strip():
             continue
-        # Use the existing token splitter only inside the section; no cross-section overlap.
-        parts = chunking_by_fixed_token(tokenizer, body, size, chunk_overlap_token_size=0, _emit_source_span=True)
-        for j, part in enumerate(parts):
-            if isinstance(part.get("_source_span"), (list, tuple)) and len(part["_source_span"]) == 2:
-                part["_source_span"] = [start + x for x in part["_source_span"]]
+        # Work with character slices, not decoded BPE windows: a token boundary
+        # can cut a Chinese character in half. Preserve exact source spans.
+        for j, (lo,hi) in enumerate(split_section(tokenizer,body,size)):
+            piece = body[lo:hi]
+            part = {"content":piece,"tokens":len(tokenizer.encode(piece)),
+                    "_source_span":{"start":start+lo,"end":start+hi}}
             result.append({**part, "chunk_order_index": len(result), "heading_path": path,
                 "section_id": sid, "parent_section_id": parent, "section_part": j,
                 "section_start": start, "section_end": end, "chunking_strategy": "H"})
     return result
+
+
+def split_section(tokenizer,text,size):
+    """Prefer paragraph/sentence boundaries while enforcing a hard token limit."""
+    pos, n = 0, len(text)
+    while pos < n:
+        # Probe a bounded window rather than encoding the entire remaining
+        # chapter at every iteration.
+        upper = min(n,pos+max(32,size*4))
+        while upper < n and len(tokenizer.encode(text[pos:upper])) <= size:
+            upper = min(n,pos+2*(upper-pos))
+        if len(tokenizer.encode(text[pos:upper])) <= size:
+            end = upper
+        else:
+            low, high = pos+1, upper
+            end = pos
+            while low <= high:
+                mid = (low+high)//2
+                if len(tokenizer.encode(text[pos:mid])) <= size:
+                    end,low = mid,mid+1
+                else:
+                    high = mid-1
+            if end == pos:
+                raise ValueError("Token limit too small for a single character")
+            # Prefer a natural boundary near the maximum feasible end.
+            if end < n:
+                window = text[pos:end]
+                candidates = [m.end() for m in re.finditer(r"\n\n+|\n|[。！？；.!?]\s*",window)
+                              if m.end() >= max(1,len(window)*0.6)]
+                if candidates:
+                    cut = pos+candidates[-1]
+                    if len(tokenizer.encode(text[pos:cut])) <= size:
+                        end = cut
+        if text[pos:end].strip():
+            yield pos,end
+        pos = end

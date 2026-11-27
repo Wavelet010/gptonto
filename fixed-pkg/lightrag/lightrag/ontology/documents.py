@@ -65,5 +65,6 @@ async def split_document(filename, data, doc_id, options):
             chunks = await chunking_by_semantic_vector(tokenizer,text,size,embedding_func=embed)
         else:
             chunks = chunking_by_fixed_token(tokenizer,text,size,chunk_overlap_token_size=overlap)
-        chunks = enforce_chunk_token_limit_before_embedding(chunks, tokenizer, size)
+        if strategy != "H":
+            chunks = enforce_chunk_token_limit_before_embedding(chunks, tokenizer, size)
         return [{**chunk,"chunk_order_index":i,"chunking_strategy":strategy} for i,chunk in enumerate(chunks) if chunk.get("content","").strip()]
