@@ -181,7 +181,7 @@ def create_app():
 
     @api.get("/runtime")
     async def runtime():
-        return {"llm_queue":llm_stats(),"active_documents":len(tasks)}
+        return {"llm_queue":await llm_stats(),"active_documents":len(tasks)}
 
     @api.get("/parsers")
     async def parsers():
@@ -240,6 +240,17 @@ def create_app():
         except ValueError as exc: raise HTTPException(409,str(exc)) from exc
         return {"deleted":id}
 
+    @api.get("/graph/labels")
+    async def graph_labels(q:str=Query("",max_length=300),limit:int=Query(100,ge=1,le=1000)):
+        from .graph_adapter import graph_labels
+        return await asyncio.to_thread(graph_labels,store,q,limit)
+
+    @api.get("/graph")
+    async def graph(label:str=Query("*",max_length=500),max_depth:int=Query(2,ge=1,le=8),
+                    max_nodes:int=Query(500,ge=1,le=1000),document_id:str | None=None):
+        from .graph_adapter import graph_data
+        return await asyncio.to_thread(graph_data,store,label,max_depth,max_nodes,document_id)
+
     @api.get("/instances")
     async def instances(document_id:str | None=None,q:str=Query("",max_length=300),
                         class_uri:str | None=None,offset:int=Query(0,ge=0),
@@ -268,6 +279,14 @@ def create_app():
         return (Path(__file__).parent/"web.html").read_text(encoding="utf-8")
 
     app.include_router(api)
+    graph_dir = Path(__file__).parent/"graph_webui"
+    if (graph_dir/"index.html").is_file():
+        from fastapi.staticfiles import StaticFiles
+        app.mount("/graph-ui",StaticFiles(directory=graph_dir,html=True),name="graph-ui")
+    else:
+        @app.get("/graph-ui/",response_class=HTMLResponse)
+        async def graph_unbuilt():
+            return HTMLResponse("<h2>原版图谱前端尚未构建</h2><p>请参考 GPTOnto.md 构建图谱资源后重启。<a href='../'>返回</a></p>",status_code=503)
     return app
 
 
