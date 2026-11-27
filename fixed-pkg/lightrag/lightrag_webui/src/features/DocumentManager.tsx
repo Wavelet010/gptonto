@@ -1687,7 +1687,7 @@ export default function DocumentManager() {
                                 })()}
 
                                 {hasDocumentDetails(doc) && <DocumentStatusDetailsDialog doc={doc} />}
-                                {ontologyGraphMode&&<OntologyEvidenceDialog docId={doc.id} filename={doc.file_path}/>}
+                                {ontologyGraphMode&&<><OntologyEvidenceDialog docId={doc.id} filename={doc.file_path}/>{["failed","processed"].includes(doc.status)&&<Button size="sm" variant="outline" onClick={()=>{if(window.confirm(t("gptonto.retryConfirm","Re-extract all chunks using the saved document and ontology configuration?")))ontologyPost("documents/"+doc.id+"/retry?mode=all").then(()=>refreshDocumentsThrottled()).catch(e=>toast.error(String(e)))}}>{t("gptonto.retryAll","Re-extract")}</Button>}</>}
                               </div>
                             </TableCell>
                             <TableCell>{doc.content_length ?? '-'}</TableCell>

@@ -58,7 +58,7 @@ export default function UploadDocumentsDialog({
   const [ontologyProfiles,setOntologyProfiles]=useState<{id:string;name:string;enabled:number}[]>([])
   const [parsers,setParsers]=useState<{id:string;available:boolean;requirement?:string}[]>([])
   const [crossChunk,setCrossChunk]=useState(true)
-  useEffect(()=>{if(open&&ontologyGraphMode){ontologyGraphRequest<typeof ontologyProfiles>('profiles').then(x=>setOntologyProfiles(x.filter(p=>p.enabled))).catch(e=>toast.error(String(e)));ontologyGraphRequest<typeof parsers>('parsers').then(setParsers).catch(e=>toast.error(String(e)))}},[open])
+  useEffect(()=>{if(open&&ontologyGraphMode){ontologyGraphRequest<typeof ontologyProfiles>('profiles',{enabled_only:'true'}).then(x=>setOntologyProfiles(x.filter(p=>p.enabled))).catch(e=>toast.error(String(e)));ontologyGraphRequest<typeof parsers>('parsers').then(setParsers).catch(e=>toast.error(String(e)))}},[open])
 
   const handleRejectedFiles = useCallback(
     (rejectedFiles: FileRejection[]) => {
@@ -94,7 +94,6 @@ export default function UploadDocumentsDialog({
   const profilesFetchingRef = useRef(false)
 
   useEffect(() => {
-    if(ontologyGraphMode)return
     const shouldFetch = (open || chunkingStrategy === 'structure_aware') &&
       availableProfiles.length === 0 &&
       !profilesFetchingRef.current
@@ -144,7 +143,7 @@ export default function UploadDocumentsDialog({
 
         // Build chunking config JSON — parse user-supplied params
         let chunkingParams: Record<string, any> = {}
-        if (chunkingParamsJson.trim()) {
+        if (chunkingParamsJson.trim() && (!ontologyGraphMode || chunkingStrategy!=='numbered_heading')) {
           try {
             chunkingParams = JSON.parse(chunkingParamsJson)
           } catch {
@@ -156,7 +155,7 @@ export default function UploadDocumentsDialog({
         let ontologyOptions:Record<string,unknown>|undefined
         if(ontologyGraphMode){
           let parsedParams={};try{parsedParams=parserParams.trim()?JSON.parse(parserParams):{}}catch{toast.error(t('documentPanel.uploadDocuments.invalidParamsJson'));return}
-          ontologyOptions={parser,parser_params:parsedParams,heading_depth:headingDepth,heading_formats:headingFormats,number_base:numberBase?Number(numberBase):null,size,overlap,modalities,cross_chunk:crossChunk,...(selectedProfiles.length?{profile_ids:selectedProfiles}:{})}
+          ontologyOptions={parser,parser_params:parsedParams,edp_profile:chunkingStrategy==='structure_aware'?profileName||null:null,heading_depth:headingDepth,heading_formats:headingFormats,number_base:numberBase?Number(numberBase):null,size,overlap,modalities,cross_chunk:crossChunk,...(selectedProfiles.length?{profile_ids:selectedProfiles}:{})}
         }
         const chunkingConfig = { strategy: chunkingStrategy, params: chunkingParams }
         const chunkingJson = JSON.stringify(chunkingConfig)
@@ -331,7 +330,7 @@ export default function UploadDocumentsDialog({
 
           <div className={cn(
             'flex items-center gap-2',
-            (ontologyGraphMode || chunkingStrategy === 'recursive_character' || chunkingStrategy === 'semantic_vector') ? '' : 'hidden'
+            ((ontologyGraphMode && chunkingStrategy !== 'numbered_heading') || chunkingStrategy === 'recursive_character' || chunkingStrategy === 'semantic_vector') ? '' : 'hidden'
           )}>
             <label className="text-sm font-medium whitespace-nowrap">
               {t('documentPanel.uploadDocuments.chunkingParams')}
@@ -348,7 +347,7 @@ export default function UploadDocumentsDialog({
 
           <div className={cn(
             'flex items-center gap-2',
-            !ontologyGraphMode && chunkingStrategy === 'structure_aware' ? '' : 'hidden'
+            chunkingStrategy === 'structure_aware' ? '' : 'hidden'
           )}>
             <label className="text-sm font-medium whitespace-nowrap">
               {t('documentPanel.uploadDocuments.parserProfile')}
@@ -382,7 +381,7 @@ export default function UploadDocumentsDialog({
             <label className="block">{t("gptonto.profiles","Extraction profiles (none = all enabled)")}<select multiple className="w-full border rounded" value={selectedProfiles} onChange={e=>setSelectedProfiles(Array.from(e.target.selectedOptions).map(x=>x.value))}>{ontologyProfiles.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
             <div className="flex flex-wrap gap-3">{["images","tables","equations"].map(m=><label key={m}><input type="checkbox" checked={modalities.includes(m)} onChange={e=>setModalities(prev=>e.target.checked?[...prev,m]:prev.filter(x=>x!==m))}/> {t("gptonto."+m,m)}</label>)}</div>
             <label><input type="checkbox" checked={crossChunk} onChange={e=>setCrossChunk(e.target.checked)}/> {t("gptonto.crossChunk","Cross-chunk relations")}</label>
-            <label className="block">{t("gptonto.preview","Preview one file (optional)")}<input type="file" onChange={async e=>{const file=e.target.files?.[0];if(!file)return;try{const strategies:Record<string,string>={fixed_token:"F",recursive_character:"R",semantic_vector:"V",paragraph_semantic:"P",structure_aware:"S",numbered_heading:"H"};const form=new FormData();form.append("file",file);form.append("options",JSON.stringify({strategy:strategies[chunkingStrategy],chunk_params:chunkingParamsJson.trim()?JSON.parse(chunkingParamsJson):{},parser,parser_params:parserParams.trim()?JSON.parse(parserParams):{},heading_depth:headingDepth,heading_formats:headingFormats,number_base:numberBase?Number(numberBase):null,size,overlap,modalities,cross_chunk:crossChunk}));const r=await ontologyGraphRequest<{preview_id?:string;count:number;chunks:{content:string}[]}>("documents/preview",{}, {method:"POST",body:form});if(r.preview_id)setPreviewIds(prev=>({...prev,[file.name]:r.preview_id!}));setPreviewText(r.count+" blocks\n"+r.chunks.slice(0,20).map((c,i)=>"#"+(i+1)+" "+c.content).join("\n\n"))}catch(err){toast.error(String(err))}}}/></label>{previewText&&<pre className="max-h-40 overflow-auto whitespace-pre-wrap">{previewText}</pre>}
+            <label className="block">{t("gptonto.preview","Preview one file (optional)")}<input type="file" onChange={async e=>{const file=e.target.files?.[0];if(!file)return;try{const strategies:Record<string,string>={fixed_token:"F",recursive_character:"R",semantic_vector:"V",paragraph_semantic:"P",structure_aware:"S",numbered_heading:"H"};const form=new FormData();form.append("file",file);form.append("options",JSON.stringify({strategy:strategies[chunkingStrategy],chunk_params:chunkingStrategy!=="numbered_heading"&&chunkingParamsJson.trim()?JSON.parse(chunkingParamsJson):{},parser,edp_profile:chunkingStrategy==="structure_aware"?profileName||null:null,parser_params:parserParams.trim()?JSON.parse(parserParams):{},heading_depth:headingDepth,heading_formats:headingFormats,number_base:numberBase?Number(numberBase):null,size,overlap,modalities,cross_chunk:crossChunk}));const r=await ontologyGraphRequest<{preview_id?:string;count:number;chunks:{content:string}[]}>("documents/preview",{}, {method:"POST",body:form});if(r.preview_id)setPreviewIds(prev=>({...prev,[file.name]:r.preview_id!}));setPreviewText(r.count+" blocks\n"+r.chunks.slice(0,20).map((c,i)=>"#"+(i+1)+" "+c.content).join("\n\n"))}catch(err){toast.error(String(err))}}}/></label>{previewText&&<pre className="max-h-40 overflow-auto whitespace-pre-wrap">{previewText}</pre>}
           </div> : <div className="flex items-center gap-2 px-1">
             <input
               type="checkbox"

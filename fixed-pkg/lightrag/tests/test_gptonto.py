@@ -422,3 +422,76 @@ def test_native_docx_image_analysis_with_original_pipeline(tmp_path,monkeypatch)
     assert any(c.get("evidence_kind")=="multimodal_analysis" for c in chunks)
     assert any(a["path"].endswith(".drawings.json") for a in artifact_manifest(bundles[0]))
     assert any(a["path"].endswith(".png") for a in artifact_manifest(bundles[0]))
+
+
+
+def test_upstream_chunk_configuration_and_profile_snapshot(monkeypatch):
+    from lightrag.ontology.config import resolve_options,profile_manager
+    from lightrag.ontology.app import Options
+    monkeypatch.setenv("CHUNK_R_SIZE","512")
+    monkeypatch.setenv("CHUNK_R_OVERLAP_SIZE","32")
+    monkeypatch.setenv("CHUNK_R_SEPARATORS",'["。","\\n"]')
+    opts=Options(strategy="R")
+    resolved=resolve_options("a.txt",opts.model_dump(),opts.model_fields_set)
+    assert resolved["size"]==512 and resolved["overlap"]==32
+    assert resolved["chunk_params"]["separators"]==["。","\n"]
+    assert resolved["resolved_parser"]=="legacy"
+    opts=Options(strategy="R",size=900,overlap=50)
+    resolved=resolve_options("a.txt",opts.model_dump(),opts.model_fields_set)
+    assert resolved["size"]==900 and resolved["overlap"]==50
+    names=profile_manager().list_profiles()
+    if names:
+        opts=Options(strategy="S",edp_profile=names[0])
+        resolved=resolve_options("a.txt",opts.model_dump(),opts.model_fields_set)
+        assert resolved["edp_profile_data"]["profile_name"]
+
+
+def test_document_wide_functional_conflict_keeps_diagnostics(tmp_path):
+    import copy
+    from lightrag.ontology.assertions import validate_document_assertions
+    schema,raw=fixture()
+    schema["properties"][EX+"batteryLevel"]["functional"]=True
+    profile={"id":"p","schema":schema,"prompt":{"identity_properties":{EX+"Device":EX+"deviceId"}}}
+    a={"chunk":{"content":TEXT},"routes":[],"errors":[],"extractions":[{"profile_id":"p",**validate(raw,schema,TEXT)}]}
+    b=copy.deepcopy(a)
+    b["chunk"]["content"]=TEXT.replace("88","99")
+    attr=b["extractions"][0]["entities"][0]["attributes"][1]
+    attr.update(value=99,evidence="电量99%")
+    checked=validate_document_assertions("d",[a,b],[profile])
+    assert all(c["assertion_errors"] for c in checked)
+    assert {r["assertion"]["value"] for c in checked for r in c["rejected_assertions"]}=={88,99}
+    assert all(not any(x["property_uri"]==EX+"batteryLevel" for x in c["extractions"][0]["entities"][0]["attributes"]) for c in checked)
+    store=Store(tmp_path/"conflicts.sqlite3")
+    did=store.new_document("test.txt",TEXT.encode(),{},[profile],did="d")
+    store.commit(did,checked,[profile])
+    assert store.document(did)["status"]=="PARTIAL"
+    assert store.retry_input(did)[1]==[0,1]
+    assert store.chunk_page(did,1,1)["total"]==2
+    assert len(store.chunk_page(did,1,1)["chunks"])==1
+
+
+def test_shared_model_concurrency(tmp_path,monkeypatch):
+    from lightrag.ontology.llm_runtime import create_model_provider,create_llm_runtime
+    import lightrag.llm.openai as module
+    monkeypatch.setenv("LLM_MODEL","mock")
+    monkeypatch.setenv("VLM_MODEL","mock-vlm")
+    monkeypatch.setenv("GPTONTO_LLM_CONCURRENCY","1")
+    monkeypatch.setenv("GPTONTO_LLM_CACHE","false")
+    active=peak=0
+    async def fake(*args,**kwargs):
+        nonlocal active,peak
+        active+=1
+        peak=max(peak,active)
+        try:
+            await asyncio.sleep(.01)
+            return "{}"
+        finally: active-=1
+    monkeypatch.setattr(module,"openai_complete_if_cache",fake)
+    async def run():
+        provider=create_model_provider()
+        llm,_,close,_=create_llm_runtime(Store(tmp_path/"queue.sqlite3"),provider)
+        try:
+            await asyncio.gather(llm("text","sys"),provider("metadata"),provider("image",image_inputs=[{}]))
+        finally: await close()
+    asyncio.run(run())
+    assert peak==1

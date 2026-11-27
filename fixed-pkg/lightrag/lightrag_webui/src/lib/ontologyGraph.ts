@@ -30,6 +30,6 @@ export async function ontologyUpload<T>(path:string,form:FormData,onProgress?:(v
   })
   return response.data
 }
-export async function ontologyDownload(path:string,filename:string){
-  const response=await ontologyGraphFetch(path);const url=URL.createObjectURL(await response.blob());const a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
+export async function ontologyDownload(path:string,filename:string,params:Record<string,string|number>={}){
+  const response=await ontologyGraphFetch(path,params);const url=URL.createObjectURL(await response.blob());const a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
 }

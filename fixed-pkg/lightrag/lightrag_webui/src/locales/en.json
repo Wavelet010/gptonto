@@ -523,6 +523,16 @@
     "lastPage": "Last Page"
   },
   "gptonto": {
+    "instances": "Instances",
+    "export": "Export",
+    "retryAll": "Re-extract",
+    "retryConfirm": "Re-extract all chunks using the saved document and ontology configuration?",
+    "diagnostics": "Routing / validation diagnostics",
+    "searchInstances": "Name, ID or attribute",
+    "allTypes": "All types",
+    "search": "Search",
+    "type": "Type",
+    "attributes": "Attributes",
     "normalized": "Normalized chunk (absolute source position unavailable)",
     "loadFullDocument": "Load full document evidence and assets",
     "ontologies": "Ontologies",

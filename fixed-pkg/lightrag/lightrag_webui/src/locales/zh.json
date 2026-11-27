@@ -523,6 +523,16 @@
     "lastPage": "末页"
   },
   "gptonto": {
+    "instances": "实例管理",
+    "export": "导出",
+    "retryAll": "整篇重新抽取",
+    "retryConfirm": "使用保存的文档与本体配置重新抽取全部文本块？",
+    "diagnostics": "路由及校验诊断",
+    "searchInstances": "名称、编号或属性",
+    "allTypes": "全部类型",
+    "search": "查询",
+    "type": "本体类型",
+    "attributes": "属性",
     "normalized": "规范化文本块（无法可靠定位原文绝对位置）",
     "loadFullDocument": "加载全文证据及原始解析资产",
     "ontologies": "本体管理",

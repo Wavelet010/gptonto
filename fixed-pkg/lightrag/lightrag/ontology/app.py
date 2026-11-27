@@ -225,7 +225,7 @@ def create_app():
         except ValueError as exc: raise HTTPException(422,str(exc)) from exc
 
     @api.get("/profiles")
-    async def profiles(): return store.profiles()
+    async def profiles(enabled_only:bool=False): return store.profiles(enabled_only=enabled_only)
 
     @api.patch("/profiles/{id}")
     async def enable_profile(id:str,body:Enabled):
@@ -391,6 +391,11 @@ def create_app():
     async def chunks(id:str):
         if not store.document_exists(id): raise HTTPException(404,"Unknown document")
         return await asyncio.to_thread(store.chunks,id)
+
+    @api.get("/documents/{id}/chunks/page")
+    async def chunk_page(id:str,offset:int=Query(0,ge=0),limit:int=Query(20,ge=1,le=200)):
+        if not store.document_exists(id): raise HTTPException(404,"Unknown document")
+        return await asyncio.to_thread(store.chunk_page,id,offset,limit)
 
     @api.post("/documents/{id}/retry",status_code=202)
     async def retry(id:str, mode:Literal["failed","all"]="failed"):

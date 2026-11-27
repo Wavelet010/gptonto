@@ -371,6 +371,17 @@ class Store:
                      "last_retry":diagnostics.get(r["ord"])} for r in db.execute(
                 "SELECT id,ord,result FROM chunks WHERE doc_id=? ORDER BY ord",(did,))]
 
+    def chunk_page(self,did,offset=0,limit=20):
+        with self.connect() as db:
+            db.execute("BEGIN")
+            total=db.execute("SELECT COUNT(*) FROM chunks WHERE doc_id=?",(did,)).fetchone()[0]
+            rows=db.execute("""SELECT c.id,c.ord,c.result,d.result AS diagnostic
+                FROM chunks c LEFT JOIN retry_diagnostics d ON d.doc_id=c.doc_id AND d.ord=c.ord
+                WHERE c.doc_id=? ORDER BY c.ord LIMIT ? OFFSET ?""",(did,limit,offset))
+            return {"total":total,"offset":offset,"limit":limit,"chunks":[
+                {"id":r["id"],**json.loads(r["result"]),"last_retry":json.loads(r["diagnostic"]) if r["diagnostic"] else None}
+                for r in rows]}
+
     def export(self, did=None):
         """Export valid instances only, with assertions and source provenance."""
         filt = " WHERE c.doc_id=?" if did else ""

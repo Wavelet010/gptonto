@@ -952,7 +952,7 @@ export const uploadDocument = async (
 }
 
 export const getProfiles = async (): Promise<string[]> => {
-  if (ontologyGraphMode) return []
+  if (ontologyGraphMode) return ontologyGraphRequest<string[]>('edp_profiles')
   const response = await axiosInstance.get('/documents/profiles')
   return response.data
 }
