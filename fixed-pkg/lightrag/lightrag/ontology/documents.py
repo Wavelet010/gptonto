@@ -1,46 +1,16 @@
-"""Reuse LightRAG native document parsing and all five original chunk algorithms."""
+"""Reuse the original parser lifecycle and six chunk strategies without RAG indexes."""
 import os
 import tempfile
 from pathlib import Path
 from .heading import heading_chunks
 
 
-def parse_document(filename, data, doc_id, directory, engine="auto"):
-    suffix = Path(filename).suffix.lower()
-    os.environ.setdefault("NATIVE_MD_IMAGE_DOWNLOAD_ENABLED", "false")
-    if engine == "native" or (engine == "auto" and suffix in {".docx", ".md"}):
-        if suffix not in {".docx", ".md"}:
-            raise ValueError("Native parser supports DOCX and Markdown")
-        from lightrag.parser.docx.parser import NativeDocxParser
-        from lightrag.parser.markdown.parser import NativeMarkdownParser
-        from lightrag.sidecar import write_sidecar
-        parser = NativeDocxParser() if suffix == ".docx" else NativeMarkdownParser()
-        source = directory / ("document"+suffix)
-        source.write_bytes(data)
-        parsed_dir = directory / "parsed"
-        asset_dir = parsed_dir / "document.blocks.assets"
-        asset_dir.mkdir(parents=True, exist_ok=True)
-        blocks, warnings, metadata = parser.extract(source, parsed_dir=parsed_dir, asset_dir=asset_dir, base_name="document")
-        if not blocks:
-            raise ValueError("No document blocks")
-        ir = parser.build_ir(blocks, document_name=source.name, asset_dir_name=asset_dir.name, metadata=metadata)
-        parsed = write_sidecar(ir, parsed_dir=parsed_dir, doc_id="doc-"+doc_id,
-                              engine=parser.engine_name, clean_parsed_dir=False,
-                              block_drawing_path_style=parser.sidecar_path_style)
-        return parsed["content"], parsed["blocks_path"]
-    from lightrag.parser.registry import suffix_capabilities
-    if suffix.lstrip(".") not in suffix_capabilities("legacy"):
-        raise ValueError("Unsupported document type")
-    from lightrag.parser.legacy.extractors import extract_text
-    return extract_text(data,suffix,pdf_password=os.getenv("PDF_DECRYPT_PASSWORD")), None
-
-
-async def parse_external(filename,data,doc_id,directory,engine):
-    """Use upstream download/IR/sidecar hooks, without the RAG persistence layer."""
-    import asyncio
+async def parse_with_registry(filename,data,doc_id,directory,engine="auto"):
+    from lightrag.parser.base import ParseContext, ResolvedSource
     from lightrag.parser.registry import get_parser, suffix_capabilities, engine_endpoint_configured, engine_endpoint_requirement
-    from lightrag.sidecar import write_sidecar
     suffix = Path(filename).suffix.lower()
+    if engine == "auto":
+        engine = "native" if suffix.lstrip(".") in suffix_capabilities("native") else "legacy"
     if suffix.lstrip(".") not in suffix_capabilities(engine):
         raise ValueError("Unsupported suffix for "+engine)
     if not engine_endpoint_configured(engine):
@@ -48,15 +18,31 @@ async def parse_external(filename,data,doc_id,directory,engine):
     parser = get_parser(engine)
     source = directory / ("document"+suffix)
     source.write_bytes(data)
-    raw = directory / "raw"
-    raw.mkdir()
-    await parser.download_into(raw,source,upload_name=source.name)
-    def normalize():
-        ir = parser.build_ir(raw,source.name)
-        parser.validate_ir(ir,file_path=filename,raw_dir=raw)
-        parsed = write_sidecar(ir,parsed_dir=directory/"parsed",doc_id="doc-"+doc_id,engine=engine)
-        return parsed["content"],parsed["blocks_path"]
-    return await asyncio.to_thread(normalize)
+    os.environ.setdefault("NATIVE_MD_IMAGE_DOWNLOAD_ENABLED","false")
+
+    class ParseSink:
+        async def _persist_parsed_full_docs(self, doc_id, record):
+            # GPTOnto persists source and chunk results itself; the original
+            # parser still executes its normal lifecycle, with no RAG writes.
+            return None
+
+    class LocalContext(ParseContext):
+        def source_path(self, parser_engine):
+            return source
+        def resolve(self, parser_engine):
+            return ResolvedSource(source,source.name,directory/"parsed")
+        async def archive_source(self, source_path):
+            # Source bytes are already persisted in the ontology document row.
+            return None
+
+    context = LocalContext(ParseSink(),"doc-"+doc_id,source.name,{"parse_engine":engine})
+    result = await parser.parse(context)
+    return result.content,result.blocks_path or None,engine
+
+
+async def parse_external(filename,data,doc_id,directory,engine):
+    text,blocks,_ = await parse_with_registry(filename,data,doc_id,directory,engine)
+    return text,blocks
 
 
 async def split_document(filename, data, doc_id, options):
@@ -68,11 +54,7 @@ async def split_document(filename, data, doc_id, options):
     tokenizer = TiktokenTokenizer()
     with tempfile.TemporaryDirectory(prefix="gptonto-") as tmp:
         engine = options.get("parser","auto")
-        if engine in {"mineru","docling"}:
-            text, blocks = await parse_external(filename,data,doc_id,Path(tmp),engine)
-        else:
-            text, blocks = await asyncio.to_thread(parse_document,filename,data,doc_id,Path(tmp),engine)
-        resolved_engine = ("native" if Path(filename).suffix.lower() in {".docx",".md"} else "legacy") if engine=="auto" else engine
+        text,blocks,resolved_engine = await parse_with_registry(filename,data,doc_id,Path(tmp),engine)
         if not text.strip():
             raise ValueError("No usable text; scanned PDFs require OCR before upload")
         if strategy == "H":

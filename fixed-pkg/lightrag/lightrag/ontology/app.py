@@ -46,22 +46,13 @@ class Enabled(BaseModel):
 def create_app():
     store = Store(os.getenv("GPTONTO_DB","data/gptonto.sqlite3"))
     tasks = set()
-    semaphore = asyncio.Semaphore(max(1,int(os.getenv("GPTONTO_LLM_CONCURRENCY","4"))))
+    from .llm_runtime import create_llm_runtime
+    llm, fresh_llm, close_llm, llm_stats = create_llm_runtime(store)
     document_semaphore = asyncio.Semaphore(max(1,int(os.getenv("GPTONTO_DOCUMENT_CONCURRENCY","2"))))
     key = os.getenv("GPTONTO_API_KEY")
     async def auth(authorization: str | None = Header(None)):
         if key and not hmac.compare_digest(authorization or "", "Bearer "+key):
             raise HTTPException(401,"Invalid API key")
-
-    async def llm(prompt, system):
-        from lightrag.llm.openai import openai_complete_if_cache
-        model = os.getenv("LLM_MODEL")
-        if not model:
-            raise ValueError("LLM_MODEL not configured")
-        async with semaphore:
-            return await openai_complete_if_cache(model,prompt,system_prompt=system,
-                base_url=os.getenv("LLM_BINDING_HOST"),api_key=os.getenv("LLM_BINDING_API_KEY"),
-                stream=False,timeout=int(os.getenv("GPTONTO_LLM_TIMEOUT","120")))
 
     async def process(did, retry_mode=None):
         async with document_semaphore:
@@ -76,10 +67,10 @@ def create_app():
                             store.status(did,"COMPLETED")
                             return
                         records = await extract_chunks([previous[i]["chunk"] for i in indices],
-                            doc["snapshot"],llm,concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")))
+                            doc["snapshot"],fresh_llm,concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")))
                         merged, diagnostics = store.prepare_retry(previous,dict(zip(indices,records)))
                         if doc["options"].get("cross_chunk",True):
-                            merged = await complete_relationships(did,merged,doc["snapshot"],llm,
+                            merged = await complete_relationships(did,merged,doc["snapshot"],fresh_llm,
                                 concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")))
                             # Do not replace an existing graph with an incomplete second pass.
                             if any(r.get("cross_errors") for r in merged):
@@ -115,6 +106,7 @@ def create_app():
         active = list(tasks)
         for task in active: task.cancel()
         await asyncio.gather(*active,return_exceptions=True)
+        await close_llm()
 
     app = FastAPI(title="GPTOnto", lifespan=lifespan)
     from fastapi import APIRouter
@@ -186,6 +178,10 @@ def create_app():
         try: store.set_enabled("resources",id,body.enabled)
         except KeyError: raise HTTPException(404,"Unknown resource")
         return {"enabled":body.enabled}
+
+    @api.get("/runtime")
+    async def runtime():
+        return {"llm_queue":llm_stats(),"active_documents":len(tasks)}
 
     @api.get("/parsers")
     async def parsers():

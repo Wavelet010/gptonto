@@ -209,17 +209,18 @@ def test_external_parser_hooks(tmp_path,monkeypatch):
     from lightrag.ontology.documents import parse_external
     import lightrag.parser.registry as registry
     import lightrag.sidecar as sidecar
+    from lightrag.parser.base import ParseResult
     class Parser:
-        async def download_into(self,raw,source,upload_name):
-            assert source.read_bytes()==b"example"
-            assert upload_name=="document.pdf"
-        def build_ir(self,raw,name):
-            assert name=="document.pdf"
-            return object()
-        def validate_ir(self,ir,**kwargs): pass
+        async def parse(self,ctx):
+            resolved = ctx.resolve("mineru")
+            assert resolved.source_path.read_bytes()==b"example"
+            assert resolved.document_name=="document.pdf"
+            assert ctx.content_data["parse_engine"]=="mineru"
+            await ctx.rag._persist_parsed_full_docs(ctx.doc_id,{"content":"解析结果"})
+            await ctx.archive_source(str(resolved.source_path))
+            return ParseResult(ctx.doc_id,ctx.file_path,"lightrag","解析结果","blocks.jsonl")
     monkeypatch.setattr(registry,"get_parser",lambda name:Parser())
     monkeypatch.setattr(registry,"engine_endpoint_configured",lambda name:True)
-    monkeypatch.setattr(sidecar,"write_sidecar",lambda *a,**kw:{"content":"解析结果","blocks_path":"blocks.jsonl"})
     assert asyncio.run(parse_external("source.pdf",b"example","a"*32,tmp_path,"mineru"))==("解析结果","blocks.jsonl")
 
 
@@ -245,4 +246,28 @@ def test_http_api_contract(tmp_path,monkeypatch):
             r=await client.post("/ontology-api/documents/preview",headers=headers,
                 files={"file":("demo.txt","一、设备\n设备D-001。\n二、状态\n正常。".encode())})
             assert r.status_code==200 and r.json()["count"]==2
+    asyncio.run(run())
+
+
+def test_upstream_queue_and_cache(tmp_path,monkeypatch):
+    import lightrag.llm.openai as provider
+    from lightrag.ontology.llm_runtime import create_llm_runtime
+    monkeypatch.setenv("LLM_MODEL","mock-model")
+    monkeypatch.setenv("GPTONTO_LLM_CACHE","true")
+    calls=[]
+    async def mock(*args,**kwargs):
+        calls.append(args)
+        return '{"matches":[]}'
+    monkeypatch.setattr(provider,"openai_complete_if_cache",mock)
+    store=Store(tmp_path/"cache.sqlite3")
+    async def run():
+        llm,fresh,close,stats=create_llm_runtime(store)
+        try:
+            assert await llm("test","system")=='{"matches":[]}'
+            assert await llm("test","system")=='{"matches":[]}'
+            assert len(calls)==1
+            assert await fresh("test","system")=='{"matches":[]}'
+            assert len(calls)==2
+        finally:
+            await close()
     asyncio.run(run())

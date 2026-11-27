@@ -31,6 +31,9 @@ class Store:
         with self.connect() as db:
             db.executescript("""
             PRAGMA journal_mode=WAL;
+            CREATE TABLE IF NOT EXISTS llm_cache (
+                id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
             CREATE TABLE IF NOT EXISTS resources (
                 id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
                 content TEXT NOT NULL, data TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
