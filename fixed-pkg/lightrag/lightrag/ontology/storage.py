@@ -204,6 +204,14 @@ class Store:
             if not row: raise KeyError(cid)
             return {**dict(row),"data":json.loads(row["data"])}
 
+    def save_prepared_chunks(self,did,chunks):
+        with self.connect() as db:
+            db.execute("INSERT OR REPLACE INTO prepared_chunks VALUES(?,?)",(did,dump(chunks)))
+
+    def document_exists(self,did):
+        with self.connect() as db:
+            return db.execute("SELECT 1 FROM documents WHERE id=?",(did,)).fetchone() is not None
+
     def prepared_chunks(self,did):
         with self.connect() as db:
             row=db.execute("SELECT data FROM prepared_chunks WHERE doc_id=?",(did,)).fetchone()
@@ -261,7 +269,7 @@ class Store:
 
     @staticmethod
     def has_errors(record):
-        return bool(record.get("errors") or record.get("cross_errors")) or any(e.get("errors") for e in record.get("extractions", []))
+        return bool(record.get("errors") or record.get("cross_errors") or record.get("assertion_errors")) or any(e.get("errors") for e in record.get("extractions", []))
 
     def retry_input(self, did):
         """Existing chunks are the canonical retry input, not a reparse with drifting boundaries."""
@@ -302,7 +310,7 @@ class Store:
             for order, rec in enumerate(records):
                 cid = digest(did, order)
                 db.execute("INSERT INTO chunks VALUES(?,?,?,?,?)",(cid,did,order,dump(rec["chunk"]),dump(rec)))
-                partial |= bool(rec["errors"])
+                partial |= bool(rec["errors"] or rec.get("assertion_errors"))
                 for ex in rec["extractions"]:
                     pid = ex["profile_id"]
                     partial |= bool(ex["errors"])

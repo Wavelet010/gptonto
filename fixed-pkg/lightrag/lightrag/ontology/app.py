@@ -15,6 +15,7 @@ from .schema import compile_ttl
 from .documents import split_document
 from .engine import extract_chunks
 from .cross_chunk import complete_relationships
+from .assertions import validate_document_assertions
 
 load_dotenv()
 
@@ -106,14 +107,22 @@ def create_app():
                                 for i in indices:
                                     diagnostics.setdefault(i, records[indices.index(i)])
                                 merged = previous
+                        checked=validate_document_assertions(did,merged,doc["snapshot"])
+                        # A failed replacement must not remove facts previously accepted.
+                        conflicts={i:r for i,r in enumerate(checked) if r.get("assertion_errors") and r.get("rejected_assertions")!=merged[i].get("rejected_assertions")}
+                        if conflicts:
+                            diagnostics.update(conflicts)
+                            for i in indices: diagnostics.setdefault(i,records[indices.index(i)])
+                            checked=previous
                         progress(did,"SAVING")
-                        store.commit(did,merged,doc["snapshot"],diagnostics=diagnostics)
+                        store.commit(did,checked,doc["snapshot"],diagnostics=diagnostics)
                         return
                 chunks = store.prepared_chunks(did)
                 if chunks is None:
                     chunks = await split_document(doc["filename"],doc["source"],did,doc["options"],
                         artifact_sink=lambda bundle:store.save_artifacts(did,bundle),multimodal=analyze_modalities,
                         stage=lambda name:progress(did,name),metadata_llm=metadata_llm)
+                    store.save_prepared_chunks(did,chunks)
                 if not chunks: raise ValueError("No usable chunks")
                 progress(did,"EXTRACTING",0,len(chunks))
                 records = await extract_chunks(chunks,doc["snapshot"],llm,
@@ -123,6 +132,7 @@ def create_app():
                     records = await complete_relationships(did,records,doc["snapshot"],llm,
                         concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")),
                         progress=lambda done,total:progress(did,"CROSS_CHUNK",done,total))
+                records=validate_document_assertions(did,records,doc["snapshot"])
                 progress(did,"SAVING")
                 store.commit(did,records,doc["snapshot"])
             except TaskCancelled:
@@ -140,6 +150,9 @@ def create_app():
         phases[did]={"phase":"QUEUED","done":0,"total":0,"updated_at":now()}
         def finished(t):
             tasks.discard(t)
+            if t.cancelled():
+                store.status(did,"FAILED","Interrupted; retry document")
+            if active.get(did) is not t: return
             active.pop(did,None)
             cancelled.discard(did)
             phases.pop(did,None)
@@ -376,12 +389,12 @@ def create_app():
 
     @api.get("/documents/{id}/chunks")
     async def chunks(id:str):
-        try: store.document(id)
-        except KeyError: raise HTTPException(404,"Unknown document")
-        return store.chunks(id)
+        if not store.document_exists(id): raise HTTPException(404,"Unknown document")
+        return await asyncio.to_thread(store.chunks,id)
 
     @api.post("/documents/{id}/retry",status_code=202)
     async def retry(id:str, mode:Literal["failed","all"]="failed"):
+        if id in active: raise HTTPException(409,"Document still processing")
         try: store.retry(id)
         except ValueError as exc: raise HTTPException(409,str(exc)) from exc
         enqueue(id,mode)
@@ -410,16 +423,14 @@ def create_app():
                         limit:int=Query(50,ge=1,le=100),focus:str | None=None):
         from .browse import browse_instances
         if document_id:
-            try: store.document(document_id)
-            except KeyError: raise HTTPException(404,"Unknown document")
+            if not store.document_exists(document_id): raise HTTPException(404,"Unknown document")
         return await asyncio.to_thread(browse_instances,store,document_id,q,class_uri,offset,limit,focus)
 
     @api.get("/export")
     async def export(document_id:str | None=None, format:Literal["json","ttl"]="json"):
         if document_id:
-            try: store.document(document_id)
-            except KeyError: raise HTTPException(404,"Unknown document")
-        data = store.export(document_id)
+            if not store.document_exists(document_id): raise HTTPException(404,"Unknown document")
+        data = await asyncio.to_thread(store.export,document_id)
         if format == "ttl":
             from fastapi.responses import Response
             from .exporter import rdf_turtle

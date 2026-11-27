@@ -141,7 +141,8 @@ async def enrich_edp(chunks,text,filename,options,llm):
             chunk["edp_metadata"]=metadata
         # Preserve source fields; generated metadata must not override evidence.
         chunk.setdefault("heading_path",chunk.get("heading_breadcrumb",""))
-    enrich_chunks_with_context(chunks,doc_title=Path(filename).stem,config=context)
-    for chunk in chunks:
-        chunk["edp_context"]=chunk.pop("embedding_text","")
-        chunk.pop("chunk_text",None)
+    # Context builder reads flattened fields; isolate them from source metadata.
+    context_inputs=[{**c.get("edp_metadata",{}),**c} for c in chunks]
+    enrich_chunks_with_context(context_inputs,doc_title=Path(filename).stem,config=context)
+    for chunk,enriched in zip(chunks,context_inputs):
+        chunk["edp_context"]=enriched.get("embedding_text","")
