@@ -11,7 +11,7 @@ from .storage import entity_id
 REFERENCE = re.compile(r"上述|前述|该(?:设备|网关|区域|系统|节点|对象|装置|报告|工单|摄像机|实体)|其(?:连接|位于|属于|对应|关联)|上述两|两者|\b(?:aforementioned|former|latter|this device|that device|the gateway|it)\b",re.I)
 
 
-async def complete_relationships(doc_id, records, profiles, llm, concurrency=4, candidate_limit=40):
+async def complete_relationships(doc_id, records, profiles, llm, concurrency=4, candidate_limit=40, progress=None):
     """Only examine chunks with cross-chunk reference signals.
 
     IDs are produced by the same code as SQLite persistence. No new entities
@@ -95,8 +95,10 @@ async def complete_relationships(doc_id, records, profiles, llm, concurrency=4, 
             rec["status"] = "PARTIAL"
         elif rec["cross_relationships"] and rec.get("status") == "NO_MATCH":
             rec["status"] = "COMPLETED"
+    if progress: progress(0,len(result))
     for start in range(0,len(result),max(1,concurrency)):
         await asyncio.gather(*(process(i,result[i]) for i in range(start,min(start+max(1,concurrency),len(result)))))
+        if progress: progress(min(start+max(1,concurrency),len(result)),len(result))
     # Check functional predicates across the document, not just one model answer.
     functional = {u for p in profiles for u,v in p["schema"]["relationships"].items() if v.get("functional")}
     targets = {}

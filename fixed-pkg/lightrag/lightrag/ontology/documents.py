@@ -49,7 +49,7 @@ async def parse_external(filename,data,doc_id,directory,engine):
     return text,blocks
 
 
-async def split_document(filename, data, doc_id, options, *, artifact_sink=None, multimodal=None):
+async def split_document(filename, data, doc_id, options, *, artifact_sink=None, multimodal=None, stage=None):
     import asyncio
     from lightrag.utils import TiktokenTokenizer, EmbeddingFunc, enforce_chunk_token_limit_before_embedding
     from lightrag.chunker import (chunking_by_fixed_token, chunking_by_recursive_character,
@@ -89,10 +89,12 @@ async def split_document(filename, data, doc_id, options, *, artifact_sink=None,
         from .evidence import locate_chunks, pack_artifacts
         chunks=locate_chunks(text,chunks)
         if options.get("modalities"):
+            if stage: stage("ANALYZING")
             if not blocks or multimodal is None:
                 raise ValueError("Multimodal analysis requires a sidecar parser and configured model")
             extra=await multimodal(doc_id,filename,text,blocks,options["modalities"],tokenizer,len(chunks))
             chunks.extend({**c,"evidence_kind":"multimodal_analysis"} for c in extra)
+        if stage: stage("CHUNKING")
         if artifact_sink:
             bundle=await asyncio.to_thread(pack_artifacts,Path(tmp),text)
             artifact_sink(bundle)

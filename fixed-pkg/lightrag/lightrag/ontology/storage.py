@@ -235,10 +235,26 @@ class Store:
         db.execute("DELETE FROM entities WHERE NOT EXISTS(SELECT 1 FROM entity_sources s WHERE s.entity_id=entities.id)")
 
     def delete_document(self, did):
+        self.delete_documents([did])
+
+    def delete_documents(self, ids=None):
+        """All-or-nothing deletion; source bytes, sidecars and evidence cascade."""
         with self.connect() as db:
-            if not db.execute("DELETE FROM documents WHERE id=? AND status NOT IN ('QUEUED','PROCESSING')",(did,)).rowcount:
-                raise ValueError("Document missing or still processing")
+            db.execute("BEGIN IMMEDIATE")
+            if ids is None:
+                ids=[r[0] for r in db.execute("SELECT id FROM documents")]
+            ids=list(dict.fromkeys(ids))
+            for did in ids:
+                row=db.execute("SELECT status FROM documents WHERE id=?",(did,)).fetchone()
+                if not row or row[0] in ("QUEUED","PROCESSING"):
+                    raise ValueError("Document missing or still processing")
+            db.executemany("DELETE FROM documents WHERE id=?",[(did,) for did in ids])
             self._prune(db)
+            return len(ids)
+
+    def clear_cache(self):
+        with self.connect() as db:
+            db.execute("DELETE FROM llm_cache")
 
     @staticmethod
     def has_errors(record):

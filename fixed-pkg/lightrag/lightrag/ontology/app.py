@@ -48,6 +48,19 @@ class Enabled(BaseModel):
 def create_app():
     store = Store(os.getenv("GPTONTO_DB","data/gptonto.sqlite3"))
     tasks = set()
+    active = {}
+    cancelled = set()
+    phases = {}
+    history = []
+    from datetime import datetime, timezone
+    def now(): return datetime.now(timezone.utc).isoformat()
+    class TaskCancelled(Exception): pass
+    def progress(did,phase,done=0,total=0):
+        if did in cancelled: raise TaskCancelled('Cancelled by user')
+        phases[did]={'phase':phase,'done':done,'total':total,'updated_at':now()}
+        if done==0 or done==total:
+            history.append(f'{now()} {did[:8]} {phase} {done}/{total}')
+            del history[:-200]
     from .preview import PreviewCache
     previews = PreviewCache()
     from .llm_runtime import create_llm_runtime
@@ -64,6 +77,7 @@ def create_app():
         async with document_semaphore:
             try:
                 doc = store.document(did)
+                progress(did,"PARSING")
                 store.status(did,"PROCESSING")
                 if retry_mode:
                     previous, failed = store.retry_input(did)
@@ -73,30 +87,40 @@ def create_app():
                             store.status(did,"COMPLETED")
                             return
                         records = await extract_chunks([previous[i]["chunk"] for i in indices],
-                            doc["snapshot"],fresh_llm,concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")))
+                            doc["snapshot"],fresh_llm,concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")),
+                            progress=lambda done,total:progress(did,"EXTRACTING",done,total))
                         merged, diagnostics = store.prepare_retry(previous,dict(zip(indices,records)))
                         if doc["options"].get("cross_chunk",True):
                             merged = await complete_relationships(did,merged,doc["snapshot"],fresh_llm,
-                                concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")))
+                                concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")),
+                                progress=lambda done,total:progress(did,"CROSS_CHUNK",done,total))
                             # Do not replace an existing graph with an incomplete second pass.
                             if any(r.get("cross_errors") for r in merged):
                                 diagnostics.update({i:r for i,r in enumerate(merged) if r.get("cross_errors")})
                                 for i in indices:
                                     diagnostics.setdefault(i, records[indices.index(i)])
                                 merged = previous
+                        progress(did,"SAVING")
                         store.commit(did,merged,doc["snapshot"],diagnostics=diagnostics)
                         return
                 chunks = store.prepared_chunks(did)
                 if chunks is None:
                     chunks = await split_document(doc["filename"],doc["source"],did,doc["options"],
-                        artifact_sink=lambda bundle:store.save_artifacts(did,bundle),multimodal=analyze_modalities)
+                        artifact_sink=lambda bundle:store.save_artifacts(did,bundle),multimodal=analyze_modalities,
+                        stage=lambda name:progress(did,name))
                 if not chunks: raise ValueError("No usable chunks")
+                progress(did,"EXTRACTING",0,len(chunks))
                 records = await extract_chunks(chunks,doc["snapshot"],llm,
-                    concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")))
+                    concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")),
+                    progress=lambda done,total:progress(did,"EXTRACTING",done,total))
                 if doc["options"].get("cross_chunk",True):
                     records = await complete_relationships(did,records,doc["snapshot"],llm,
-                        concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")))
+                        concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")),
+                        progress=lambda done,total:progress(did,"CROSS_CHUNK",done,total))
+                progress(did,"SAVING")
                 store.commit(did,records,doc["snapshot"])
+            except TaskCancelled:
+                store.status(did,"CANCELLED","Cancelled by user; previous valid knowledge retained")
             except asyncio.CancelledError:
                 store.status(did,"FAILED","Interrupted; retry document")
                 raise
@@ -106,7 +130,14 @@ def create_app():
     def enqueue(did, retry_mode=None):
         task = asyncio.create_task(process(did,retry_mode))
         tasks.add(task)
-        task.add_done_callback(tasks.discard)
+        active[did]=task
+        phases[did]={"phase":"QUEUED","done":0,"total":0,"updated_at":now()}
+        def finished(t):
+            tasks.discard(t)
+            active.pop(did,None)
+            cancelled.discard(did)
+            phases.pop(did,None)
+        task.add_done_callback(finished)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -240,6 +271,61 @@ def create_app():
 
     @api.get("/documents")
     async def documents(): return store.documents()
+
+    @api.post("/documents/paginated")
+    async def paginated(body:dict):
+        from .document_api import document_page
+        return await asyncio.to_thread(document_page,store,body,dict(phases))
+
+    @api.get("/documents/status_counts")
+    async def status_counts():
+        from .document_api import document_page
+        return {"status_counts":(await asyncio.to_thread(document_page,store,{},dict(phases)))["status_counts"]}
+
+    @api.get("/documents/pipeline_status")
+    async def pipeline_status():
+        running=list(phases.values())
+        return {"autoscanned":False,"busy":bool(active),"job_name":"GPTOnto",
+                "docs":len(active),"batchs":sum(x["total"] for x in running),
+                "cur_batch":sum(x["done"] for x in running),
+                "request_pending":any(x["phase"]=="QUEUED" for x in running),
+                "cancellation_requested":bool(cancelled),"latest_message":history[-1] if history else "",
+                "history_messages":history[-100:],"update_status":phases}
+
+    @api.post("/documents/cancel_pipeline")
+    async def cancel_pipeline():
+        cancelled.update(active)
+        return {"status":"cancellation_requested" if active else "not_busy",
+                "message":"Cancellation takes effect at the next safe processing boundary"}
+
+    @api.post("/documents/reprocess_failed")
+    async def reprocess_failed():
+        for doc in store.documents():
+            if doc["status"] in {"FAILED","PARTIAL","CANCELLED"} and doc["id"] not in active:
+                store.retry(doc["id"])
+                enqueue(doc["id"],"failed")
+        return {"status":"reprocessing_started","message":"Retry queued","track_id":""}
+
+    @api.post("/documents/delete_batch")
+    async def delete_batch(body:dict):
+        ids=body.get("ids")
+        if not isinstance(ids,list) or not ids or not all(isinstance(i,str) for i in ids):
+            raise HTTPException(422,"Expected document IDs")
+        try: n=store.delete_documents(ids)
+        except ValueError as exc: raise HTTPException(409,str(exc)) from exc
+        return {"status":"deletion_started","message":f"Deleted {n} documents","doc_id":""}
+
+    @api.delete("/documents")
+    async def clear_documents():
+        try: n=store.delete_documents()
+        except ValueError as exc: raise HTTPException(409,str(exc)) from exc
+        return {"status":"success","message":f"Deleted {n} documents"}
+
+    @api.post("/documents/clear_cache")
+    async def clear_cache():
+        if active: raise HTTPException(409,"Stop processing before clearing cache")
+        store.clear_cache()
+        return {"status":"success","message":"Cache cleared"}
 
     @api.get("/documents/{id}/source")
     async def source_document(id:str):

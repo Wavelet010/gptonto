@@ -19,7 +19,7 @@ def parse_json(raw):
     return json.loads(raw, parse_constant=reject_constant, parse_float=finite_float)
 
 
-async def extract_chunks(chunks, profiles, llm, concurrency=4):
+async def extract_chunks(chunks, profiles, llm, concurrency=4, progress=None):
     """Profiles are immutable snapshots; never mutate shared prompt globals."""
     semaphore = asyncio.Semaphore(max(1, concurrency))
     async def call(system, payload):
@@ -79,6 +79,8 @@ async def extract_chunks(chunks, profiles, llm, concurrency=4):
         return record
     # Bound the number of live chunk coroutines as well as concurrent LLM calls.
     result = []
+    if progress: progress(0,len(chunks))
     for start in range(0, len(chunks), max(1, concurrency)):
         result.extend(await asyncio.gather(*(process(c) for c in chunks[start:start+max(1, concurrency)])))
+        if progress: progress(len(result),len(chunks))
     return result
