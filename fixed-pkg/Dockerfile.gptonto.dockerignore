@@ -1,0 +1,8 @@
+**
+!Dockerfile.gptonto
+!gptonto-wheels/
+!gptonto-wheels/**
+!lightrag/
+!lightrag/lightrag/
+!lightrag/lightrag/**
+lightrag/lightrag/**/__pycache__/

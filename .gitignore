@@ -24,3 +24,9 @@ fixed-pkg/lightrag/lightrag/edp/profiles/general.yml
 fixed-pkg/lightrag/lightrag/edp/profiles/week_report.yml
 fixed-pkg/data/prompts/entity_type/
 fixed-pkg/.env
+
+# GPTOnto local credentials, wheels and runtime data
+fixed-pkg/.env.gptonto
+fixed-pkg/gptonto-wheels/*
+!fixed-pkg/gptonto-wheels/.gitkeep
+fixed-pkg/lightrag/data/
