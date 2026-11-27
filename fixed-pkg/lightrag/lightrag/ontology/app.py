@@ -28,6 +28,8 @@ class Options(BaseModel):
     profile_ids: list[str] | None = None
     cross_chunk: bool = True
     parser: Literal["auto","native","legacy","mineru","docling"] = "auto"
+    parser_params: dict = Field(default_factory=dict)
+    modalities: list[Literal["images","tables","equations"]] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def check(self):
@@ -50,6 +52,8 @@ def create_app():
     previews = PreviewCache()
     from .llm_runtime import create_llm_runtime
     llm, fresh_llm, close_llm, llm_stats = create_llm_runtime(store)
+    from .multimodal import create_multimodal_runtime
+    analyze_modalities, close_multimodal = create_multimodal_runtime(store)
     document_semaphore = asyncio.Semaphore(max(1,int(os.getenv("GPTONTO_DOCUMENT_CONCURRENCY","2"))))
     key = os.getenv("GPTONTO_API_KEY")
     async def auth(authorization: str | None = Header(None)):
@@ -84,7 +88,8 @@ def create_app():
                         return
                 chunks = store.prepared_chunks(did)
                 if chunks is None:
-                    chunks = await split_document(doc["filename"],doc["source"],did,doc["options"])
+                    chunks = await split_document(doc["filename"],doc["source"],did,doc["options"],
+                        artifact_sink=lambda bundle:store.save_artifacts(did,bundle),multimodal=analyze_modalities)
                 if not chunks: raise ValueError("No usable chunks")
                 records = await extract_chunks(chunks,doc["snapshot"],llm,
                     concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")))
@@ -111,6 +116,7 @@ def create_app():
         for task in active: task.cancel()
         await asyncio.gather(*active,return_exceptions=True)
         await close_llm()
+        await close_multimodal()
 
     app = FastAPI(title="GPTOnto", lifespan=lifespan)
     from fastapi import APIRouter
@@ -212,7 +218,8 @@ def create_app():
         prepared=previews.take(preview_id,filename,data,options_dict) if preview_id else None
         did = store.new_document(filename,data,options_dict,profiles,
                                  did=prepared[0] if prepared else None,
-                                 prepared=prepared[1] if prepared else None)
+                                 prepared=prepared[1] if prepared else None,
+                                 artifacts=prepared[2] if prepared and len(prepared)>2 else None)
         enqueue(did)
         return {"id":did,"status":"QUEUED","preview_reused":bool(prepared)}
 
@@ -224,14 +231,49 @@ def create_app():
             data = await read(file,32*1024*1024)
             filename=Path(file.filename or "document.txt").name
             did=uuid.uuid4().hex
-            chunks = await split_document(filename,data,did,opts.model_dump())
-            token=previews.put(did,filename,data,opts.model_dump(),chunks)
+            artifacts=[]
+            chunks = await split_document(filename,data,did,opts.model_dump(),artifact_sink=artifacts.append,multimodal=analyze_modalities)
+            token=previews.put(did,filename,data,opts.model_dump(),chunks,artifacts[0] if artifacts else None)
             return {"count":len(chunks),"chunks":chunks,"preview_id":token}
         except HTTPException: raise
         except Exception as exc: raise HTTPException(422,type(exc).__name__+": "+str(exc)[:300]) from exc
 
     @api.get("/documents")
     async def documents(): return store.documents()
+
+    @api.get("/documents/{id}/source")
+    async def source_document(id:str):
+        from fastapi.responses import Response
+        from urllib.parse import quote
+        try: doc=store.document(id)
+        except KeyError: raise HTTPException(404,"Unknown document")
+        return Response(doc["source"],media_type="application/octet-stream",
+                        headers={"Content-Disposition":"attachment; filename*=UTF-8''"+quote(doc["filename"],safe=""),
+                                 "X-Content-Type-Options":"nosniff"})
+
+    @api.get("/documents/{id}/artifacts")
+    async def artifacts(id:str):
+        from .evidence import artifact_manifest
+        bundle=store.artifacts(id)
+        if bundle is None: raise HTTPException(404,"No persisted parse artifacts")
+        return artifact_manifest(bundle)
+
+    @api.get("/documents/{id}/artifacts/{path:path}")
+    async def artifact(id:str,path:str):
+        from .evidence import read_artifact
+        from fastapi.responses import Response
+        bundle=store.artifacts(id)
+        if bundle is None: raise HTTPException(404,"No persisted parse artifacts")
+        try: data=read_artifact(bundle,path)
+        except KeyError: raise HTTPException(404,"Unknown artifact")
+        return Response(data,media_type="application/octet-stream",headers={"Content-Disposition":"attachment","X-Content-Type-Options":"nosniff"})
+
+    @api.get("/evidence/{chunk_id}")
+    async def evidence(chunk_id:str,quote:str=Query("",max_length=16000)):
+        from .evidence import evidence_view
+        try: chunk=store.evidence_chunk(chunk_id)
+        except KeyError: raise HTTPException(404,"Unknown evidence chunk")
+        return evidence_view(chunk,quote)
 
     @api.get("/documents/{id}/chunks")
     async def chunks(id:str):

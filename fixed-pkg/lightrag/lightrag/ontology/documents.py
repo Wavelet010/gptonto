@@ -5,12 +5,16 @@ from pathlib import Path
 from .heading import heading_chunks
 
 
-async def parse_with_registry(filename,data,doc_id,directory,engine="auto"):
+async def parse_with_registry(filename,data,doc_id,directory,engine="auto",parser_params=None):
     from lightrag.parser.base import ParseContext, ResolvedSource
     from lightrag.parser.registry import get_parser, suffix_capabilities, engine_endpoint_configured, engine_endpoint_requirement
     suffix = Path(filename).suffix.lower()
-    if engine == "auto":
-        engine = "native" if suffix.lstrip(".") in suffix_capabilities("native") else "legacy"
+    from lightrag.parser.routing import resolve_parser_directives, encode_parse_engine
+    directives = resolve_parser_directives(filename) if engine == "auto" else None
+    if directives:
+        engine = directives.engine
+    params = {**(directives.engine_params if directives else {}),**(parser_params or {})}
+    encoded_engine = encode_parse_engine(engine,params)
     if suffix.lstrip(".") not in suffix_capabilities(engine):
         raise ValueError("Unsupported suffix for "+engine)
     if not engine_endpoint_configured(engine):
@@ -35,7 +39,7 @@ async def parse_with_registry(filename,data,doc_id,directory,engine="auto"):
             # Source bytes are already persisted in the ontology document row.
             return None
 
-    context = LocalContext(ParseSink(),"doc-"+doc_id,source.name,{"parse_engine":engine})
+    context = LocalContext(ParseSink(),"doc-"+doc_id,source.name,{"parse_engine":encoded_engine})
     result = await parser.parse(context)
     return result.content,result.blocks_path or None,engine
 
@@ -45,7 +49,7 @@ async def parse_external(filename,data,doc_id,directory,engine):
     return text,blocks
 
 
-async def split_document(filename, data, doc_id, options):
+async def split_document(filename, data, doc_id, options, *, artifact_sink=None, multimodal=None):
     import asyncio
     from lightrag.utils import TiktokenTokenizer, EmbeddingFunc, enforce_chunk_token_limit_before_embedding
     from lightrag.chunker import (chunking_by_fixed_token, chunking_by_recursive_character,
@@ -54,7 +58,7 @@ async def split_document(filename, data, doc_id, options):
     tokenizer = TiktokenTokenizer()
     with tempfile.TemporaryDirectory(prefix="gptonto-") as tmp:
         engine = options.get("parser","auto")
-        text,blocks,resolved_engine = await parse_with_registry(filename,data,doc_id,Path(tmp),engine)
+        text,blocks,resolved_engine = await parse_with_registry(filename,data,doc_id,Path(tmp),engine,options.get("parser_params"))
         if not text.strip():
             raise ValueError("No usable text; scanned PDFs require OCR before upload")
         if strategy == "H":
@@ -81,4 +85,15 @@ async def split_document(filename, data, doc_id, options):
             chunks = chunking_by_fixed_token(tokenizer,text,size,chunk_overlap_token_size=overlap)
         if strategy != "H":
             chunks = enforce_chunk_token_limit_before_embedding(chunks, tokenizer, size)
+        # Keep extracted text and raw parser sidecars together with exact chunk evidence.
+        from .evidence import locate_chunks, pack_artifacts
+        chunks=locate_chunks(text,chunks)
+        if options.get("modalities"):
+            if not blocks or multimodal is None:
+                raise ValueError("Multimodal analysis requires a sidecar parser and configured model")
+            extra=await multimodal(doc_id,filename,text,blocks,options["modalities"],tokenizer,len(chunks))
+            chunks.extend({**c,"evidence_kind":"multimodal_analysis"} for c in extra)
+        if artifact_sink:
+            bundle=await asyncio.to_thread(pack_artifacts,Path(tmp),text)
+            artifact_sink(bundle)
         return [{**chunk,"chunk_order_index":i,"chunking_strategy":strategy,"parse_engine":resolved_engine} for i,chunk in enumerate(chunks) if chunk.get("content","").strip()]

@@ -30,16 +30,17 @@ class PreviewCache:
         for key,row in list(self.entries.items()):
             if row[0]<=now: self._drop(key)
 
-    def put(self,doc_id,filename,source,options,chunks):
+    def put(self,doc_id,filename,source,options,chunks,artifacts=None):
         self._expire()
         # Store serialized bytes to keep the memory bound meaningful.
         data=json.dumps(chunks,ensure_ascii=False,allow_nan=False).encode()
-        if len(data)>self.max_bytes: return None
-        while self.entries and (len(self.entries)>=self.max_entries or self.bytes+len(data)>self.max_bytes):
+        size=len(data)+len(artifacts or b"")
+        if size>self.max_bytes: return None
+        while self.entries and (len(self.entries)>=self.max_entries or self.bytes+size>self.max_bytes):
             self._drop(next(iter(self.entries)))
         key=uuid.uuid4().hex
-        self.entries[key]=(time.monotonic()+self.ttl,self.fingerprint(filename,source,options),doc_id,len(data),data)
-        self.bytes+=len(data)
+        self.entries[key]=(time.monotonic()+self.ttl,self.fingerprint(filename,source,options),doc_id,size,data,artifacts)
+        self.bytes+=size
         return key
 
     def take(self,key,filename,source,options):
@@ -48,4 +49,4 @@ class PreviewCache:
         if not row or row[1]!=self.fingerprint(filename,source,options):
             return None
         self._drop(key)
-        return row[2],json.loads(row[4])
+        return (row[2],json.loads(row[4]),row[5]) if row[5] is not None else (row[2],json.loads(row[4]))

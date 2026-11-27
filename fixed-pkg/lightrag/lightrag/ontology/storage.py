@@ -48,6 +48,10 @@ class Store:
                 options TEXT NOT NULL, snapshot TEXT NOT NULL, status TEXT NOT NULL,
                 error TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS document_artifacts (
+                doc_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+                bundle BLOB NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS prepared_chunks (
                 doc_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
                 data TEXT NOT NULL
@@ -171,14 +175,31 @@ class Store:
             if not db.execute(f"UPDATE {table} SET enabled=? WHERE id=?", (int(enabled),id)).rowcount:
                 raise KeyError(id)
 
-    def new_document(self, filename, source, options, snapshot, did=None, prepared=None):
+    def new_document(self, filename, source, options, snapshot, did=None, prepared=None, artifacts=None):
         did = did or uuid.uuid4().hex
         with self.connect() as db:
             db.execute("INSERT INTO documents(id,filename,source,options,snapshot,status) VALUES(?,?,?,?,?,?)",
                        (did,filename,source,dump(options),dump(snapshot),"QUEUED"))
             if prepared is not None:
                 db.execute("INSERT INTO prepared_chunks VALUES(?,?)",(did,dump(prepared)))
+            if artifacts is not None:
+                db.execute("INSERT INTO document_artifacts VALUES(?,?)",(did,artifacts))
         return did
+
+    def save_artifacts(self,did,bundle):
+        with self.connect() as db:
+            db.execute("INSERT OR REPLACE INTO document_artifacts VALUES(?,?)",(did,bundle))
+
+    def artifacts(self,did):
+        with self.connect() as db:
+            row=db.execute("SELECT bundle FROM document_artifacts WHERE doc_id=?",(did,)).fetchone()
+            return row[0] if row else None
+
+    def evidence_chunk(self,cid):
+        with self.connect() as db:
+            row=db.execute("SELECT c.id,c.ord,c.data,c.doc_id,d.filename FROM chunks c JOIN documents d ON d.id=c.doc_id WHERE c.id=?",(cid,)).fetchone()
+            if not row: raise KeyError(cid)
+            return {**dict(row),"data":json.loads(row["data"])}
 
     def prepared_chunks(self,did):
         with self.connect() as db:
