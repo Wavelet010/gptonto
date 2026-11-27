@@ -12,6 +12,7 @@ import {
 import Input from '@/components/ui/Input'
 import { toast } from 'sonner'
 import { errorMessage } from '@/lib/utils'
+import { ontologyGraphMode } from '@/lib/ontologyGraph'
 import { deleteDocuments } from '@/api/lightrag'
 
 import { TrashIcon, AlertTriangleIcon } from 'lucide-react'
@@ -145,6 +146,7 @@ export default function DeleteDocumentsDialog({ selectedDocIds, onDocumentsDelet
             />
           </div>
 
+          {ontologyGraphMode ? <p className="text-sm text-red-600">{t("gptonto.deleteEvidence","Deleting a document removes its source, parser assets and evidence. Other documents are retained.")}</p> : <>
           <div className="flex items-center space-x-2">
             <input
               type="checkbox"
@@ -171,7 +173,7 @@ export default function DeleteDocumentsDialog({ selectedDocIds, onDocumentsDelet
             <Label htmlFor="delete-llm-cache" className="text-sm font-medium cursor-pointer">
               {t('documentPanel.deleteDocuments.deleteLLMCacheOption')}
             </Label>
-          </div>
+          </div></>}
         </div>
 
         <DialogFooter>
