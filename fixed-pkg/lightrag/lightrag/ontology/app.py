@@ -14,6 +14,7 @@ from .storage import Store
 from .schema import compile_ttl
 from .documents import split_document
 from .engine import extract_chunks
+from .cross_chunk import complete_relationships
 
 load_dotenv()
 
@@ -25,6 +26,7 @@ class Options(BaseModel):
     heading_formats: list[Literal["chapter","chinese","bracket_cn","bracket_num","number","markdown"]] | None = None
     number_base: int | None = Field(None,ge=1,le=6)
     profile_ids: list[str] | None = None
+    cross_chunk: bool = True
 
     @model_validator(mode="after")
     def check(self):
@@ -74,12 +76,25 @@ def create_app():
                             return
                         records = await extract_chunks([previous[i]["chunk"] for i in indices],
                             doc["snapshot"],llm,concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")))
-                        store.commit_retry(did,previous,dict(zip(indices,records)),doc["snapshot"])
+                        merged, diagnostics = store.prepare_retry(previous,dict(zip(indices,records)))
+                        if doc["options"].get("cross_chunk",True):
+                            merged = await complete_relationships(did,merged,doc["snapshot"],llm,
+                                concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")))
+                            # Do not replace an existing graph with an incomplete second pass.
+                            if any(r.get("cross_errors") for r in merged):
+                                diagnostics.update({i:r for i,r in enumerate(merged) if r.get("cross_errors")})
+                                for i in indices:
+                                    diagnostics.setdefault(i, records[indices.index(i)])
+                                merged = previous
+                        store.commit(did,merged,doc["snapshot"],diagnostics=diagnostics)
                         return
                 chunks = await split_document(doc["filename"],doc["source"],did,doc["options"])
                 if not chunks: raise ValueError("No usable chunks")
                 records = await extract_chunks(chunks,doc["snapshot"],llm,
                     concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")))
+                if doc["options"].get("cross_chunk",True):
+                    records = await complete_relationships(did,records,doc["snapshot"],llm,
+                        concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")))
                 store.commit(did,records,doc["snapshot"])
             except asyncio.CancelledError:
                 store.status(did,"FAILED","Interrupted; retry document")

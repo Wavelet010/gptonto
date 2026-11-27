@@ -15,6 +15,15 @@ def digest(*values):
     return hashlib.sha256(dump(values).encode()).hexdigest()
 
 
+def entity_id(doc_id, order, profile, entity):
+    """Shared identifier contract for local extraction and cross-chunk references."""
+    cls = entity["class_uri"]
+    key = profile["prompt"].get("identity_properties",{}).get(cls)
+    vals = {dump(a["value"]) for a in entity["attributes"]
+            if a["property_uri"] == key and str(a["value"]) in a["evidence"]}
+    return digest(cls,key,next(iter(vals))) if key and len(vals)==1 else digest(digest(doc_id,order),profile["id"],entity["local_id"])
+
+
 class Store:
     def __init__(self, path):
         self.path = Path(path)
@@ -196,7 +205,7 @@ class Store:
 
     @staticmethod
     def has_errors(record):
-        return bool(record.get("errors")) or any(e.get("errors") for e in record.get("extractions", []))
+        return bool(record.get("errors") or record.get("cross_errors")) or any(e.get("errors") for e in record.get("extractions", []))
 
     def retry_input(self, did):
         """Existing chunks are the canonical retry input, not a reparse with drifting boundaries."""
@@ -207,8 +216,8 @@ class Store:
             failed = [i for i,r in enumerate(records) if self.has_errors(r) or i in diagnostics]
             return records, failed
 
-    def commit_retry(self, did, previous, updates, profiles):
-        """Replace successful retries only; preserve previous assertions on failed retries."""
+    def prepare_retry(self, previous, updates):
+        """Select valid new chunks, retaining old facts for failed replacements."""
         merged = list(previous)
         diagnostics = {}
         for i, record in updates.items():
@@ -216,6 +225,11 @@ class Store:
                 diagnostics[i] = record
             else:
                 merged[i] = record
+        return merged, diagnostics
+
+    def commit_retry(self, did, previous, updates, profiles):
+        """Replace successful retries only; preserve previous assertions on failed retries."""
+        merged, diagnostics = self.prepare_retry(previous,updates)
         self.commit(did, merged, profiles, diagnostics=diagnostics)
 
     def commit(self, did, records, profiles, diagnostics=None):
@@ -235,14 +249,10 @@ class Store:
                 for ex in rec["extractions"]:
                     pid = ex["profile_id"]
                     partial |= bool(ex["errors"])
-                    keys = by_id[pid]["prompt"].get("identity_properties",{})
                     mapping = {}
                     for e in ex["entities"]:
                         cls = e["class_uri"]
-                        key = keys.get(cls)
-                        vals = {dump(a["value"]) for a in e["attributes"] if a["property_uri"] == key and str(a["value"]) in a["evidence"]}
-                        # No name-only merging. With no explicit unique key, use chunk-local identity.
-                        eid = digest(cls,key,next(iter(vals))) if key and len(vals)==1 else digest(cid,pid,e["local_id"])
+                        eid = entity_id(did,order,by_id[pid],e)
                         mapping[e["local_id"]] = eid
                         db.execute("INSERT OR IGNORE INTO entities VALUES(?,?,?)",(eid,cls,e["name"]))
                         db.execute("INSERT OR IGNORE INTO entity_sources VALUES(?,?,?,?,?)",(eid,cid,pid,e["name"],e["evidence"]))
@@ -255,6 +265,29 @@ class Store:
                         rid = digest(source,r["predicate_uri"],target)
                         db.execute("INSERT OR IGNORE INTO relationships VALUES(?,?,?,?)",(rid,source,r["predicate_uri"],target))
                         db.execute("INSERT OR IGNORE INTO relation_sources VALUES(?,?,?,?)",(rid,cid,pid,r["evidence"]))
+            # All local entities must exist before inserting document-level edges.
+            # Resolve only endpoints contributed by this very document.
+            known = {r[0] for r in db.execute("""SELECT DISTINCT s.entity_id
+                FROM entity_sources s JOIN chunks c ON c.id=s.chunk_id WHERE c.doc_id=?""",(did,))}
+            from .schema import applies
+            for order, rec in enumerate(records):
+                cid = digest(did,order)
+                partial |= bool(rec.get("cross_errors"))
+                for r in rec.get("cross_relationships",[]):
+                    source,target,pid = r["source"],r["target"],r["profile_id"]
+                    schema = by_id[pid]["schema"]
+                    pred = schema["relationships"].get(r["predicate_uri"])
+                    if source not in known or target not in known or not pred:
+                        raise ValueError("Invalid cross-chunk endpoint or predicate")
+                    types = {x["id"]:x["class_uri"] for x in db.execute(
+                        "SELECT id,class_uri FROM entities WHERE id IN (?,?)",(source,target))}
+                    if not applies(schema,types[source],pred["domain"]) or not applies(schema,types[target],pred["range"]):
+                        raise ValueError("Cross-chunk relation violates schema")
+                    if not r["evidence"].strip() or r["evidence"] not in rec["chunk"]["content"]:
+                        raise ValueError("Cross-chunk relation lacks evidence")
+                    rid = digest(source,r["predicate_uri"],target)
+                    db.execute("INSERT OR IGNORE INTO relationships VALUES(?,?,?,?)",(rid,source,r["predicate_uri"],target))
+                    db.execute("INSERT OR IGNORE INTO relation_sources VALUES(?,?,?,?)",(rid,cid,pid,r["evidence"]))
             self._prune(db)
             all_failed = bool(records) and all(
                 r.get("errors") or (r.get("extractions") and all(
