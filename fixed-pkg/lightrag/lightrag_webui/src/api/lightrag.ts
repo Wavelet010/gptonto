@@ -1,4 +1,5 @@
 import axios, { AxiosError } from 'axios'
+import { ontologyGraphMode, ontologyGraphRequest } from '@/lib/ontologyGraph'
 import { backendBaseUrl, popularLabelsDefaultLimit, searchLabelsDefaultLimit } from '@/lib/constants'
 import { errorMessage } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
@@ -553,21 +554,25 @@ export const queryGraphs = async (
   maxDepth: number,
   maxNodes: number
 ): Promise<LightragGraphType> => {
+  if (ontologyGraphMode) return ontologyGraphRequest<LightragGraphType>('graph', {label,max_depth:maxDepth,max_nodes:Math.min(maxNodes,1000)})
   const response = await axiosInstance.get(`/graphs?label=${encodeURIComponent(label)}&max_depth=${maxDepth}&max_nodes=${maxNodes}`)
   return response.data
 }
 
 export const getGraphLabels = async (): Promise<string[]> => {
+  if (ontologyGraphMode) return ontologyGraphRequest<string[]>('graph/labels')
   const response = await axiosInstance.get('/graph/label/list')
   return response.data
 }
 
 export const getPopularLabels = async (limit: number = popularLabelsDefaultLimit): Promise<string[]> => {
+  if (ontologyGraphMode) return ontologyGraphRequest<string[]>('graph/labels', {limit:Math.min(limit,1000)})
   const response = await axiosInstance.get(`/graph/label/popular?limit=${limit}`)
   return response.data
 }
 
 export const searchLabels = async (query: string, limit: number = searchLabelsDefaultLimit): Promise<string[]> => {
+  if (ontologyGraphMode) return ontologyGraphRequest<string[]>('graph/labels', {q:query,limit:Math.min(limit,1000)})
   const response = await axiosInstance.get(`/graph/label/search?q=${encodeURIComponent(query)}&limit=${limit}`)
   return response.data
 }

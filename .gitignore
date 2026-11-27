@@ -30,3 +30,5 @@ fixed-pkg/.env.gptonto
 fixed-pkg/gptonto-wheels/*
 !fixed-pkg/gptonto-wheels/.gitkeep
 fixed-pkg/lightrag/data/
+
+fixed-pkg/lightrag/lightrag/ontology/graph_webui/

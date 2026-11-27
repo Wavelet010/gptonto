@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { ontologyGraphMode } from '@/lib/ontologyGraph'
 import { useGraphStore, RawNodeType, RawEdgeType } from '@/stores/graph'
 import { useBackendState } from '@/stores/state'
 import Text from '@/components/ui/Text'
@@ -215,7 +216,7 @@ const PropertyRow = ({
   }
 
   // Use EditablePropertyRow for editable fields (description, entity_id and entity_type)
-  if (isEditable && (name === 'description' || name === 'entity_id' || name === 'entity_type'  || name === 'keywords')) {
+  if (!ontologyGraphMode && isEditable && (name === 'description' || name === 'entity_id' || name === 'entity_type'  || name === 'keywords')) {
     return (
       <EditablePropertyRow
         name={name}

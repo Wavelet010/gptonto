@@ -1,4 +1,5 @@
-import Graph, { UndirectedGraph } from 'graphology'
+import Graph, { UndirectedGraph, MultiDirectedGraph } from 'graphology'
+import { ontologyGraphMode } from '@/lib/ontologyGraph'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { errorMessage } from '@/lib/utils'
@@ -138,11 +139,16 @@ const safeNodeLabel = (labels: unknown, fallbackId: string): string =>
 // both orientations fail (e.g. both endpoints are prototype-named). Callers are
 // expected to have pre-checked hasEdge, so a real duplicate is never masked.
 const addUndirectedEdgeSafe = (
-  graph: UndirectedGraph,
+  graph: Graph,
   source: string,
   target: string,
-  attributes: Record<string, unknown>
+  attributes: Record<string, unknown>,
+  edgeId?: string
 ): string | null => {
+  if (ontologyGraphMode) {
+    if (!edgeId || graph.hasEdge(edgeId)) return null
+    return graph.addDirectedEdgeWithKey(edgeId, source, target, attributes)
+  }
   try {
     return graph.addEdge(source, target, attributes)
   } catch {
@@ -151,6 +157,29 @@ const addUndirectedEdgeSafe = (
     } catch {
       return null
     }
+  }
+}
+
+const createDisplayGraph = (): Graph => ontologyGraphMode ? new MultiDirectedGraph() : new UndirectedGraph()
+
+// Separate parallel and reverse-direction edges by stable curvature. Keep
+// legacy graph rendering untouched outside the ontology-only build.
+const updateOntologyCurves = (graph: Graph) => {
+  if (!ontologyGraphMode) return
+  const groups = new Map<string, string[]>()
+  graph.forEachEdge((edge, _attrs, source, target) => {
+    const key = JSON.stringify([source, target].sort())
+    const list = groups.get(key) || []
+    list.push(edge)
+    groups.set(key, list)
+  })
+  for (const edges of groups.values()) {
+    edges.sort()
+    edges.forEach((edge, index) => {
+      const direction = graph.source(edge) <= graph.target(edge) ? 1 : -1
+      const offset = (index - (edges.length - 1) / 2) * 0.16
+      graph.mergeEdgeAttributes(edge, {type: edges.length > 1 ? 'curvedArrow' : 'arrow', curvature: direction * offset})
+    })
   }
 }
 
@@ -268,10 +297,10 @@ const fetchGraph = async (label: string, maxDepth: number, maxNodes: number) => 
 }
 
 // Create a new graph instance with the raw graph data
-const createSigmaGraph = async (rawGraph: RawGraph | null): Promise<UndirectedGraph | null> => {
+const createSigmaGraph = async (rawGraph: RawGraph | null): Promise<Graph | null> => {
   if (!rawGraph || !rawGraph.nodes.length) return null
 
-  const graph = new UndirectedGraph()
+  const graph = createDisplayGraph()
   const typeColors = createTypeColorResolver()
   let sliceStart = performance.now()
 
@@ -320,7 +349,7 @@ const createSigmaGraph = async (rawGraph: RawGraph | null): Promise<UndirectedGr
     if (
       !graph.hasNode(rawEdge.source) ||
       !graph.hasNode(rawEdge.target) ||
-      graph.hasEdge(rawEdge.source, rawEdge.target)
+      (ontologyGraphMode ? graph.hasEdge(rawEdge.id) : graph.hasEdge(rawEdge.source, rawEdge.target))
     ) {
       continue
     }
@@ -332,7 +361,7 @@ const createSigmaGraph = async (rawGraph: RawGraph | null): Promise<UndirectedGr
       label: (rawEdge.properties?.keywords as string | undefined) || undefined,
       originalWeight: parseEdgeWeight(rawEdge.properties)
     }
-    const dynamicId = addUndirectedEdgeSafe(graph, rawEdge.source, rawEdge.target, attributes)
+    const dynamicId = addUndirectedEdgeSafe(graph, rawEdge.source, rawEdge.target, attributes, rawEdge.id)
     if (dynamicId === null) {
       skippedEdges++
       continue
@@ -345,6 +374,7 @@ const createSigmaGraph = async (rawGraph: RawGraph | null): Promise<UndirectedGr
     console.warn(`[useLightragGraph] ${skippedEdges} edges could not be added to the graph`)
   }
 
+  updateOntologyCurves(graph)
   return graph
 }
 
@@ -511,7 +541,7 @@ const useLightrangeGraph = () => {
           // Check if data is empty or invalid
           if (!data || !data.nodes || data.nodes.length === 0) {
             // Create a graph with a single "Graph Is Empty" node
-            const emptyGraph = new UndirectedGraph()
+            const emptyGraph = createDisplayGraph()
 
             // Add a single node with "Graph Is Empty" label
             emptyGraph.addNode('empty-graph-node', {
@@ -557,7 +587,7 @@ const useLightrangeGraph = () => {
             // Create and set new graph. Wrapped separately so the console
             // tells us WHERE a failure happens — a build or subscriber error
             // here would otherwise be indistinguishable from a fetch error.
-            let newSigmaGraph: UndirectedGraph | null
+            let newSigmaGraph: Graph | null
             try {
               newSigmaGraph = await createSigmaGraph(data)
             } catch (buildError) {
@@ -714,7 +744,7 @@ const useLightrangeGraph = () => {
         }
 
         // Get the label of the node to expand
-        const label = nodeToExpand.labels[0]
+        const label = ontologyGraphMode ? nodeToExpand.id : nodeToExpand.labels[0]
         if (!label) {
           console.error('Node has no label:', nodeId)
           return
@@ -875,7 +905,7 @@ const useLightrangeGraph = () => {
 
         // Helper function to update node sizes
         const updateNodeSizes = (
-          sigmaGraph: UndirectedGraph,
+          sigmaGraph: Graph,
           nodesWithDiscardedEdges: Set<string>,
           minDegree: number,
           maxDegree: number
@@ -903,7 +933,7 @@ const useLightrangeGraph = () => {
 
         // Helper function to update edge sizes
         const updateEdgeSizes = (
-          sigmaGraph: UndirectedGraph,
+          sigmaGraph: Graph,
           minWeight: number,
           maxWeight: number
         ) => {
@@ -1019,7 +1049,7 @@ const useLightrangeGraph = () => {
           const newEdge = processedEdgeById.get(edgeId)!
 
           // Skip if edge already exists
-          if (sigmaGraph.hasEdge(newEdge.source, newEdge.target)) {
+          if (ontologyGraphMode ? sigmaGraph.hasEdge(newEdge.id) : sigmaGraph.hasEdge(newEdge.source, newEdge.target)) {
             continue
           }
 
@@ -1041,7 +1071,8 @@ const useLightrangeGraph = () => {
             sigmaGraph,
             newEdge.source,
             newEdge.target,
-            edgeAttributes
+            edgeAttributes,
+            newEdge.id
           )
           if (dynamicId === null) {
             console.warn('[useLightragGraph] could not add expansion edge:', newEdge.id)
@@ -1068,6 +1099,7 @@ const useLightrangeGraph = () => {
         // Reset search engine to force rebuild
         useGraphStore.getState().resetSearchEngine()
 
+        updateOntologyCurves(sigmaGraph)
         // The graph was mutated in place (addNode/addEdge), which does NOT
         // re-notify the store. Refresh the reactive counts so the status bar and
         // the edge-count adaptive behavior react to the new size.
@@ -1101,7 +1133,7 @@ const useLightrangeGraph = () => {
   }, [nodeToExpand, sigmaGraph, rawGraph, t])
 
   // Helper function to get all nodes that will be deleted
-  const getNodesThatWillBeDeleted = useCallback((nodeId: string, graph: UndirectedGraph) => {
+  const getNodesThatWillBeDeleted = useCallback((nodeId: string, graph: Graph) => {
     const nodesToDelete = new Set<string>([nodeId])
 
     // Only direct neighbors of the deleted node can become isolated by its
@@ -1212,7 +1244,7 @@ const useLightrangeGraph = () => {
 
     // If no graph exists yet, create a new one and store it
     console.log('Creating new Sigma graph instance')
-    const graph = new UndirectedGraph()
+    const graph = createDisplayGraph()
     useGraphStore.getState().setSigmaGraph(graph)
     return graph as Graph<NodeType, EdgeType>
   }, [sigmaGraph])

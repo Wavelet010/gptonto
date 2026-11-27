@@ -3,6 +3,7 @@ import { AbstractGraph } from 'graphology-types'
 import forceAtlas2 from 'graphology-layout-forceatlas2'
 import FA2LayoutSupervisor from 'graphology-layout-forceatlas2/worker'
 import { useEffect, useRef } from 'react'
+import { ontologyGraphMode } from '@/lib/ontologyGraph'
 
 import { EdgeType, NodeType } from '@/hooks/useLightragGraph'
 import useIsDarkMode from '@/hooks/useIsDarkMode'
@@ -245,7 +246,7 @@ const GraphControl = ({ disableHoverEffect }: { disableHoverEffect?: boolean }) 
     const prev = edgeTypeRef.current
     if (prev && prev.sigma === sigma && prev.curved === curved) return
     edgeTypeRef.current = { sigma, curved }
-    setSettings({ defaultEdgeType: curved ? 'curvedNoArrow' : 'rect' })
+    setSettings({ defaultEdgeType: ontologyGraphMode ? 'arrow' : curved ? 'curvedNoArrow' : 'rect' })
     try {
       sigma.refresh()
     } catch {

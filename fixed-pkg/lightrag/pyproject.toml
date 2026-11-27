@@ -184,7 +184,7 @@ include-package-data = true
 version = {attr = "lightrag._version.__version__"}
 
 [tool.setuptools.package-data]
-lightrag = ["api/webui/**/*", "api/static/**/*", "ontology/*.html", "ontology/*.ttl", "ontology/*.yml", "ontology/*.txt"]
+lightrag = ["api/webui/**/*", "api/static/**/*", "ontology/*.html", "ontology/*.ttl", "ontology/*.yml", "ontology/*.txt", "ontology/graph_webui/**/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
