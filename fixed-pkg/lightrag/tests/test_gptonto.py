@@ -314,3 +314,53 @@ def test_graph_adapter_parallel_directed_edges_and_scope(tmp_path):
     label=graph_labels(store,"设备",document_id=did)[0]
     assert len(graph_data(store,label,1,10,did)["edges"])==2
     assert len(graph_data(store,"*",1,1,did)["nodes"])==1
+
+
+
+def test_original_evidence_and_artifact_roundtrip(tmp_path):
+    from lightrag.ontology.evidence import locate_chunks,pack_artifacts,artifact_manifest,read_artifact,evidence_view
+    text="前文😀设备D-001，电量88%。后文"
+    chunks=locate_chunks(text,[{"content":"设备D-001，电量88%。"}])
+    (tmp_path/"parsed").mkdir()
+    (tmp_path/"parsed"/"document.blocks.jsonl").write_text("test",encoding="utf-8")
+    bundle=pack_artifacts(tmp_path,text)
+    assert read_artifact(bundle,"parsed-text.txt").decode()==text
+    assert any(a["path"]=="parsed/document.blocks.jsonl" for a in artifact_manifest(bundle))
+    with pytest.raises(KeyError): read_artifact(bundle,"../secret")
+    store=Store(tmp_path/"evidence.sqlite3")
+    did=store.new_document("original.txt",text.encode(),{},[],artifacts=bundle)
+    store.commit(did,[{"chunk":chunks[0],"routes":[],"extractions":[],"errors":[]}],[])
+    cid=store.chunks(did)[0]["id"]
+    view=evidence_view(store.evidence_chunk(cid),"D-001")
+    assert view["matches"][0]["parsed_start"]==text.index("D-001")
+    assert view["filename"]=="original.txt"
+    assert store.artifacts(did)==bundle
+    store.delete_document(did)
+    assert store.artifacts(did) is None
+    with pytest.raises(KeyError): store.evidence_chunk(cid)
+
+
+def test_document_ui_contract_and_atomic_delete(tmp_path):
+    from lightrag.ontology.document_api import document_page
+    store=Store(tmp_path/"document-ui.sqlite3")
+    a=store.new_document("a.txt",b"a",{},[])
+    b=store.new_document("b.txt",b"b",{},[])
+    store.status(a,"COMPLETED")
+    store.status(b,"PROCESSING")
+    page=document_page(store,{"page_size":1},{"b":{"phase":"ANALYZING"}})
+    assert page["pagination"]["total_count"]==2
+    assert page["status_counts"]["processed"]==1
+    with pytest.raises(ValueError): store.delete_documents([a,b])
+    assert len(store.documents())==2
+    store.status(b,"CANCELLED")
+    assert store.delete_documents([a,b])==2
+
+
+def test_multimodal_evidence_not_original():
+    from lightrag.ontology.evidence import evidence_view
+    row={"id":"c","ord":0,"doc_id":"d","filename":"image.pdf",
+         "data":{"content":"模型描述","evidence_kind":"multimodal_analysis","sidecar":{"type":"drawing","id":"x"}}}
+    view=evidence_view(row,"模型")
+    assert view["evidence_kind"]=="multimodal_analysis"
+    assert view["matches"]==[{"chunk_start":0,"chunk_end":2}]
+    assert view["sidecar"]["id"]=="x"

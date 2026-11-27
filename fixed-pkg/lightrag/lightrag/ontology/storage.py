@@ -366,17 +366,26 @@ class Store:
         args = (did,) if did else ()
         with self.connect() as db:
             db.execute("BEGIN")
+            from .evidence import evidence_view
+            evidence_rows={}
+            def provenance(row):
+                cid=row["chunk_id"]
+                if cid not in evidence_rows:
+                    q=db.execute("SELECT c.id,c.ord,c.data,c.doc_id,d.filename FROM chunks c JOIN documents d ON d.id=c.doc_id WHERE c.id=?",(cid,)).fetchone()
+                    evidence_rows[cid]={**dict(q),"data":json.loads(q["data"])}
+                view=evidence_view(evidence_rows[cid],row["evidence"])
+                return {k:view[k] for k in ("filename","chunk_order_index","matches","heading","evidence_kind","sidecar","parse_engine")}
             entities = {}
             for r in db.execute("""SELECT e.id,e.class_uri,s.name,s.evidence,s.chunk_id,s.profile_id,c.doc_id
                 FROM entity_sources s JOIN entities e ON e.id=s.entity_id JOIN chunks c ON c.id=s.chunk_id"""+filt,args):
                 e = entities.setdefault(r["id"],{"id":r["id"],"class_uri":r["class_uri"],"name":r["name"],"attributes":[],"sources":[]})
-                e["sources"].append({k:r[k] for k in ("name","evidence","chunk_id","profile_id","doc_id")})
+                e["sources"].append({k:r[k] for k in ("name","evidence","chunk_id","profile_id","doc_id")}|{"provenance":provenance(r)})
             for r in db.execute("SELECT a.*,c.doc_id FROM attributes a JOIN chunks c ON c.id=a.chunk_id"+filt,args):
                 if r["entity_id"] in entities:
-                    entities[r["entity_id"]]["attributes"].append({**dict(r),"value":json.loads(r["value"])})
+                    entities[r["entity_id"]]["attributes"].append({**dict(r),"value":json.loads(r["value"]),"provenance":provenance(r)})
             rels = {}
             for r in db.execute("""SELECT r.*,s.chunk_id,s.profile_id,s.evidence,c.doc_id FROM relation_sources s
                 JOIN relationships r ON r.id=s.relationship_id JOIN chunks c ON c.id=s.chunk_id"""+filt,args):
                 rel = rels.setdefault(r["id"],{k:r[k] for k in ("id","source","predicate_uri","target")})
-                rel.setdefault("sources",[]).append({k:r[k] for k in ("chunk_id","profile_id","evidence","doc_id")})
+                rel.setdefault("sources",[]).append({k:r[k] for k in ("chunk_id","profile_id","evidence","doc_id")}|{"provenance":provenance(r)})
             return {"entities":list(entities.values()),"relationships":list(rels.values())}

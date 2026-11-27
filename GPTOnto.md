@@ -72,3 +72,11 @@ npm run build -- --mode gptonto
 ```
 
 需要 Node.js 22.12+ 或与原项目兼容的版本。产物位于 lightrag/ontology/graph_webui，Dockerfile.gptonto 会随源码一起复制；离线部署可提前构建并传输该目录，无须在服务器安装 Node.js。未构建时基础 SVG 图谱仍可用。原图谱仅开放只读操作，本体实体使用稳定 ID，采用 MultiDirectedGraph 保留有向并行边，原 LightRAG 普通构建不改变边语义。图谱接口按文档/节点/深度限制读取 SQLite，不加载全库。尚需浏览器实际验收，文档管理 React 页面、原始图像资产持久化及视觉模型仍待迁移。
+
+## 原文证据与原文档管理（第五轮）
+
+构建本体 React 前端后，首页跳转至 /graph-ui/，复用原文档管理、上传、任务状态、删除弹窗、AppSettings（语言及主题）。本体/提示词管理仍由 /legacy-ui 提供；无前端产物时保留基础 HTML。上传可指定解析器及原 parser_params、分块参数、H 标题格式、方案及多模态开关。任务状态按解析、分析、分块、抽取、跨块补全、保存展示；取消在安全边界生效，不会删除历史有效知识。原文档删除会级联清理本次来源、原文件和解析资产。
+
+每个实体、属性和关系仍要求证据字符串为文本块中的原样子串；JSON 增加 provenance 字段，记录文件、文本块、章节、证据匹配位置和证据类型。只有文本块与解析原文完全对应时才标注解析原文绝对字符位置；重复或规范化文本无法可靠定位时保留块内位置及原文。图片/表格/公式分析的模型生成文本明确标为 multimodal_analysis，不伪装为原文。原始文件下载、解析资产列表及下载、证据查看均需服务密钥（若已配置）。新导入文档保留解析文本和原 Sidecar、图片等资产（SQLite 压缩归档，默认未压缩 128 MiB 限制 GPTONTO_ARTIFACT_MAX_BYTES）。旧导入数据仍保留块内证据，未保存的历史资产需重新导入才能恢复。
+
+可选 OpenAI 兼容视觉模型：VLM_MODEL、VLM_BINDING_HOST、VLM_BINDING_API_KEY。图片分析使用原 analyze_multimodal / _build_mm_chunks_from_sidecars，不初始化 RAG。表格和公式可调用文本模型。尚需真实 VLM 服务联调。原 VLM 分析使用独立并发队列。

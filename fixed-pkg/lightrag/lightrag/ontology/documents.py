@@ -61,16 +61,25 @@ async def split_document(filename, data, doc_id, options, *, artifact_sink=None,
         text,blocks,resolved_engine = await parse_with_registry(filename,data,doc_id,Path(tmp),engine,options.get("parser_params"))
         if not text.strip():
             raise ValueError("No usable text; scanned PDFs require OCR before upload")
+        # Pass original strategy-specific options to original chunkers, not a replacement algorithm.
+        import inspect
+        params=dict(options.get("chunk_params",{}))
+        def kwargs(func, reserved):
+            allowed=set(inspect.signature(func).parameters)-set(reserved)
+            unknown=set(params)-allowed
+            if unknown: raise ValueError("Unsupported chunk parameters: "+", ".join(sorted(unknown)))
+            return params
         if strategy == "H":
+            if params: raise ValueError("H uses heading_depth, heading_formats and number_base")
             chunks = heading_chunks(tokenizer,text,size,depth=options["heading_depth"],
                 formats=options.get("heading_formats"),number_base=options.get("number_base"))
         elif strategy == "S":
-            chunks = chunking_by_structure(tokenizer,text,size)
+            chunks = chunking_by_structure(tokenizer,text,size,**kwargs(chunking_by_structure,{"tokenizer","content","chunk_token_size"}))
         elif strategy == "P":
             chunks = chunking_by_paragraph_semantic(tokenizer,text,size,blocks_path=blocks,
-                chunk_overlap_token_size=overlap,doc_id=doc_id)
+                chunk_overlap_token_size=overlap,doc_id=doc_id,**kwargs(chunking_by_paragraph_semantic,{"tokenizer","content","chunk_token_size","blocks_path","chunk_overlap_token_size","doc_id"}))
         elif strategy == "R":
-            chunks = chunking_by_recursive_character(tokenizer,text,size,chunk_overlap_token_size=overlap)
+            chunks = chunking_by_recursive_character(tokenizer,text,size,chunk_overlap_token_size=overlap,**kwargs(chunking_by_recursive_character,{"tokenizer","content","chunk_token_size","chunk_overlap_token_size"}))
         elif strategy == "V":
             from lightrag.llm.openai import openai_embed
             from functools import partial
@@ -80,9 +89,9 @@ async def split_document(filename, data, doc_id, options, *, artifact_sink=None,
                 func=partial(openai_embed.func,model=os.environ["EMBEDDING_MODEL"],
                     base_url=os.getenv("EMBEDDING_BINDING_HOST"),
                     api_key=os.getenv("EMBEDDING_BINDING_API_KEY") or os.getenv("LLM_BINDING_API_KEY")))
-            chunks = await chunking_by_semantic_vector(tokenizer,text,size,embedding_func=embed)
+            chunks = await chunking_by_semantic_vector(tokenizer,text,size,embedding_func=embed,**kwargs(chunking_by_semantic_vector,{"tokenizer","content","chunk_token_size","embedding_func"}))
         else:
-            chunks = chunking_by_fixed_token(tokenizer,text,size,chunk_overlap_token_size=overlap)
+            chunks = chunking_by_fixed_token(tokenizer,text,size,chunk_overlap_token_size=overlap,_emit_source_span=True,**kwargs(chunking_by_fixed_token,{"tokenizer","content","chunk_token_size","chunk_overlap_token_size","_emit_source_span"}))
         if strategy != "H":
             chunks = enforce_chunk_token_limit_before_embedding(chunks, tokenizer, size)
         # Keep extracted text and raw parser sidecars together with exact chunk evidence.

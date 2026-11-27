@@ -29,6 +29,7 @@ class Options(BaseModel):
     cross_chunk: bool = True
     parser: Literal["auto","native","legacy","mineru","docling"] = "auto"
     parser_params: dict = Field(default_factory=dict)
+    chunk_params: dict = Field(default_factory=dict)
     modalities: list[Literal["images","tables","equations"]] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -416,6 +417,13 @@ def create_app():
 
     @app.get("/",response_class=HTMLResponse)
     async def index():
+        if (Path(__file__).parent/"graph_webui"/"index.html").is_file():
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse("graph-ui/")
+        return (Path(__file__).parent/"web.html").read_text(encoding="utf-8")
+
+    @app.get("/legacy-ui",response_class=HTMLResponse)
+    async def legacy_ui():
         return (Path(__file__).parent/"web.html").read_text(encoding="utf-8")
 
     app.include_router(api)

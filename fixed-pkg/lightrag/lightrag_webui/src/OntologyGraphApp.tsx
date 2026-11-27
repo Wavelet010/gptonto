@@ -42,15 +42,15 @@ export default function OntologyGraphApp() {
   return <ThemeProvider>
     <main className="h-screen flex flex-col overflow-hidden">
       <header className="flex flex-wrap items-center gap-3 border-b p-3">
-        <a className="underline" href="../">返回 GPTOnto</a>
+        <a className="underline" href="../legacy-ui">{t("gptonto.resources","Ontology / prompt management")}</a>
         <strong>GPTOnto</strong><AppSettings/>
         {ready&&<><button className="border rounded px-3 py-1" onClick={()=>changeTab("documents")}>{t("gptonto.documents","Documents")}</button><button className="border rounded px-3 py-1" onClick={()=>changeTab("knowledge-graph")}>{t("gptonto.graph","Knowledge graph")}</button></>}
-        <input className="border rounded px-2 py-1" type="password" value={key} onChange={e=>setKey(e.target.value)} placeholder="API Key（如启用）" />
-        <button className="border rounded px-3 py-1" disabled={busy} onClick={()=>connect(documentId)}>连接 / 刷新</button>
-        {ready && tab==='knowledge-graph' && <select className="border rounded px-2 py-1" value={documentId} onChange={e=>connect(e.target.value)} disabled={busy}><option value="">全部文档</option>{documents.map(d=><option key={d.id} value={d.id}>{d.filename}</option>)}</select>}
+        <input className="border rounded px-2 py-1" type="password" value={key} onChange={e=>setKey(e.target.value)} placeholder={t("gptonto.apiKey","API Key (if enabled)")} />
+        <button className="border rounded px-3 py-1" disabled={busy} onClick={()=>connect(documentId)}>{t("gptonto.connect","Connect / refresh")}</button>
+        {ready && tab==='knowledge-graph' && <select className="border rounded px-2 py-1" value={documentId} onChange={e=>connect(e.target.value)} disabled={busy}><option value="">{t("gptonto.allDocs","All documents")}</option>{documents.map(d=><option key={d.id} value={d.id}>{d.filename}</option>)}</select>}
         {error && <span role="alert" className="text-red-600">{error}</span>}
       </header>
-      <div className="relative flex-1 min-h-0">{ready ? (tab==='documents'?<DocumentManager key={'doc-'+revision}/>:<GraphViewer key={revision}/>) : <p className="p-6">输入服务密钥（如已配置）并连接图谱。原有问答页面不会加载。</p>}</div>
+      <div className="relative flex-1 min-h-0">{ready ? (tab==='documents'?<DocumentManager key={'doc-'+revision}/>:<GraphViewer key={revision}/>) : <p className="p-6">{t("gptonto.connectHint","Connect using the API key if configured. Retrieval is disabled.")}</p>}</div>
     </main>
     <Toaster position="bottom-center" richColors closeButton/>
   </ThemeProvider>

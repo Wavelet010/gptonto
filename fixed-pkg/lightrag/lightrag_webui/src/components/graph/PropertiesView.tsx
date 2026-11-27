@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { ontologyGraphMode } from '@/lib/ontologyGraph'
+import OntologyEvidenceDialog from '@/components/documents/OntologyEvidenceDialog'
 import { useGraphStore, RawNodeType, RawEdgeType } from '@/stores/graph'
 import { useBackendState } from '@/stores/state'
 import Text from '@/components/ui/Text'
@@ -238,6 +239,7 @@ const PropertyRow = ({
     )
   }
 
+  if(ontologyGraphMode && (name==='sources'||name==='attributes') && Array.isArray(value)) return <div className="space-y-1"><b>{name}</b>{value.map((v:any,i:number)=><div key={i} className="border rounded p-1 break-all">{v.property_uri&&<div>{v.property_uri}: {JSON.stringify(v.value)}</div>}{v.chunk_id&&v.doc_id&&<OntologyEvidenceDialog docId={v.doc_id} filename={v.doc_id} initialChunk={v.chunk_id} initialQuote={v.evidence}/>}</div>)}</div>
   // For non-editable fields, use the regular Text component
   return (
     <div className="flex items-center gap-2">

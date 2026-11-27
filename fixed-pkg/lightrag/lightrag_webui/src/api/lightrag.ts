@@ -917,14 +917,16 @@ export const uploadDocument = async (
   chunking?: string,
   profile?: string,
   skipGraph?: boolean,
-  ontologyOptions?: Record<string,unknown>
+  ontologyOptions?: Record<string,unknown>,
+  previewId?: string
 ): Promise<DocActionResponse> => {
   const formData = new FormData()
   formData.append('file', file)
   if (ontologyGraphMode) {
     const config=chunking ? JSON.parse(chunking) : {strategy:'numbered_heading',params:{}}
     const strategies:Record<string,string>={fixed_token:'F',recursive_character:'R',semantic_vector:'V',paragraph_semantic:'P',structure_aware:'S',numbered_heading:'H'}
-    formData.append('options',JSON.stringify({strategy:strategies[config.strategy]||'H',...config.params,...ontologyOptions}))
+    formData.append('options',JSON.stringify({strategy:strategies[config.strategy]||'H',chunk_params:config.params,...ontologyOptions}))
+    if(previewId)formData.append('preview_id',previewId)
     const data=await ontologyGraphRequest<{id:string}>('documents',{}, {method:'POST',body:formData})
     onUploadProgress?.(100)
     return {status:'success',message:'Queued',track_id:data.id}

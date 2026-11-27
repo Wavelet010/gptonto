@@ -34,6 +34,8 @@ def create_multimodal_runtime(store):
             return {"vlm_process_enable":bool(model),"enable_llm_cache_for_entity_extract":enabled,
                     "llm_model_name":llm_model,"llm_binding":"openai","llm_binding_host":os.getenv("LLM_BINDING_HOST"),
                     "vlm_model":model,"vlm_binding":"openai","vlm_binding_host":vlm_host,
+                    "llm_cache_identities":{"vlm":{"role":"vlm","binding":"openai","model":model,"host":vlm_host},
+                                            "extract":{"role":"extract","binding":"openai","model":llm_model,"host":os.getenv("LLM_BINDING_HOST")}},
                     "addon_params":{"language":os.getenv("SUMMARY_LANGUAGE","Chinese")}}
 
     async def analyze(did,filename,text,blocks,modalities,tokenizer,start):
