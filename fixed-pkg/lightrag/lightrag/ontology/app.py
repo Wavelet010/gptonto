@@ -111,10 +111,18 @@ def create_app():
         return data
 
     @api.post("/ontologies")
-    async def upload_ontology(file: UploadFile=File(...), name: str=Form(...)):
+    async def upload_ontology(file: UploadFile=File(...), name: str=Form(...),
+                              dependency_ids: str=Form("[]")):
         try:
             ttl = (await read(file,2*1024*1024)).decode("utf-8-sig")
-            schema = await asyncio.to_thread(compile_ttl,ttl)
+            import json
+            ids = json.loads(dependency_ids)
+            if not isinstance(ids,list) or not all(isinstance(i,str) for i in ids):
+                raise ValueError("dependency_ids must be a JSON list of uploaded ontology IDs")
+            ids = sorted(set(ids))
+            deps = store.ontology_dependencies(ids)
+            schema = await asyncio.to_thread(compile_ttl,ttl,deps)
+            schema["dependency_ids"] = ids
             return {"id":store.resource("ontology",name,ttl,schema),"schema":schema}
         except HTTPException: raise
         except Exception as exc: raise HTTPException(422,str(exc)[:500]) from exc
@@ -214,11 +222,17 @@ def create_app():
         return {"deleted":id}
 
     @api.get("/export")
-    async def export(document_id:str | None=None):
+    async def export(document_id:str | None=None, format:Literal["json","ttl"]="json"):
         if document_id:
             try: store.document(document_id)
             except KeyError: raise HTTPException(404,"Unknown document")
-        return JSONResponse(store.export(document_id),headers={"Content-Disposition":"attachment; filename=gptonto.json"})
+        data = store.export(document_id)
+        if format == "ttl":
+            from fastapi.responses import Response
+            from .exporter import rdf_turtle
+            return Response(rdf_turtle(data),media_type="text/turtle",
+                            headers={"Content-Disposition":"attachment; filename=gptonto.ttl"})
+        return JSONResponse(data,headers={"Content-Disposition":"attachment; filename=gptonto.json"})
 
     @app.get("/",response_class=HTMLResponse)
     async def index():

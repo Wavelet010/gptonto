@@ -90,11 +90,30 @@ class Store:
             db.close()
 
     def resource(self, kind, name, content, data):
-        rid = digest(kind, name, content)
+        rid = digest(kind, name, content, data.get("dependency_ids", [])) if kind == "ontology" and data.get("dependency_ids") else digest(kind, name, content)
         with self.connect() as db:
             db.execute("INSERT OR IGNORE INTO resources(id,kind,name,content,data) VALUES(?,?,?,?,?)",
                        (rid,kind,name,content,dump(data)))
         return rid
+
+    def ontology_dependencies(self, ids):
+        """Load selected local TTL closure; never download arbitrary imports."""
+        pending, seen, texts = list(ids), set(), []
+        with self.connect() as db:
+            db.execute("BEGIN")
+            while pending:
+                rid = pending.pop()
+                if rid in seen:
+                    continue
+                row = db.execute("SELECT content,data FROM resources WHERE id=? AND kind='ontology'",(rid,)).fetchone()
+                if row is None:
+                    raise ValueError("Unknown ontology dependency: " + rid)
+                seen.add(rid)
+                texts.append(row["content"])
+                pending.extend(json.loads(row["data"]).get("dependency_ids",[]))
+            if sum(map(len,texts)) > 8*1024*1024:
+                raise ValueError("Ontology dependency closure exceeds size limit")
+        return texts
 
     def resources(self, kind):
         with self.connect() as db:

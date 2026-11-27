@@ -2,11 +2,26 @@
 from rdflib import Graph, URIRef, RDF, RDFS, OWL, XSD
 
 
-def compile_ttl(text):
+def compile_ttl(text, dependencies=()):
+    """Resolve imports only from explicitly selected immutable local resources."""
     graph = Graph()
     graph.parse(data=text, format="turtle", publicID="urn:gptonto:ontology:")
-    if list(graph.objects(None, OWL.imports)):
-        raise ValueError("owl:imports must be resolved into a local combined TTL before upload")
+    root_iris = sorted(str(x) for x in graph.subjects(RDF.type, OWL.Ontology)
+                       if isinstance(x, URIRef))
+    imported = set()
+    for dep in dependencies:
+        other = Graph()
+        other.parse(data=dep, format="turtle", publicID="urn:gptonto:ontology:")
+        for iri in other.subjects(RDF.type, OWL.Ontology):
+            if isinstance(iri, URIRef):
+                imported.add(iri)
+        graph += other
+    declared = imported | set(map(URIRef, root_iris))
+    unresolved = set(graph.objects(None, OWL.imports)) - declared
+    if unresolved:
+        raise ValueError("Missing local owl:imports dependencies: " + ", ".join(sorted(map(str,unresolved))))
+    # Do not dereference ontology IRIs over the network.
+    
     classes = {s for kind in (OWL.Class, RDFS.Class)
                for s in graph.subjects(RDF.type, kind) if isinstance(s, URIRef)}
     if not classes:
@@ -21,7 +36,8 @@ def compile_ttl(text):
                     result.add(parent)
                     pending.append(parent)
         return sorted(map(str, result))
-    schema = {"classes": {}, "properties": {}, "relationships": {}, "warnings": []}
+    schema = {"classes": {}, "properties": {}, "relationships": {}, "warnings": [],
+              "ontology_iris": root_iris}
     for node in sorted(classes, key=str):
         schema["classes"][str(node)] = {"label": label(node),
             "description": str(graph.value(node, RDFS.comment) or ""),
@@ -43,9 +59,12 @@ def compile_ttl(text):
                 continue
             schema[key][str(node)] = {"label": label(node),
                 "description": str(graph.value(node, RDFS.comment) or ""),
-                "domain": sorted(map(str, domains)), "range": sorted(map(str, ranges))}
+                "domain": sorted(map(str, domains)), "range": sorted(map(str, ranges)),
+                "functional": (node, RDF.type, OWL.FunctionalProperty) in graph}
     if any(graph.subjects(RDF.type, OWL.Restriction)):
-        schema["warnings"].append("OWL restrictions/cardinality are not enforced by this MVP; review before use")
+        schema["warnings"].append("General OWL restrictions/cardinality are not enforced; review before use")
+    if any(graph.triples((None, OWL.unionOf, None))) or any(graph.triples((None, OWL.intersectionOf, None))):
+        schema["warnings"].append("Complex OWL class expressions are not enforced")
     return schema
 
 
@@ -120,6 +139,17 @@ def validate(raw, schema, text):
             if not prop or not applies(schema, cls, prop["domain"]) or not typed_value(a.get("value"), prop["range"][0]) or not evidence(a):
                 errors.append(f"Invalid attribute: {eid} {uri}"); continue
             attrs.append({"property_uri": uri, "value": a["value"], "datatype": prop["range"][0], "evidence": a["evidence"]})
+        # Functional properties permit at most one distinct value for an
+        # instance. Keep conflicting assertions in raw output, not valid facts.
+        import json
+        values_by_uri = {}
+        for a in attrs:
+            values_by_uri.setdefault(a["property_uri"],set()).add(json.dumps(a["value"],sort_keys=True))
+        conflicts = {u for u,vals in values_by_uri.items()
+                     if len(vals)>1 and schema["properties"][u].get("functional")}
+        for uri in sorted(conflicts):
+            errors.append(f"Conflicting functional attribute: {eid} {uri}")
+        attrs = [a for a in attrs if a["property_uri"] not in conflicts]
         clean = {"local_id": eid, "class_uri": cls, "name": name, "evidence": e["evidence"], "attributes": attrs}
         by_id[eid] = clean
         entities.append(clean)
@@ -131,4 +161,12 @@ def validate(raw, schema, text):
         if not source or not target or not pred or not applies(schema, source["class_uri"], pred["domain"]) or not applies(schema, target["class_uri"], pred["range"]) or not evidence(r):
             errors.append(f"Invalid relationship: {r['predicate_uri']}"); continue
         relationships.append({k: r[k] for k in ("source", "target", "predicate_uri", "evidence")})
+    targets = {}
+    for r in relationships:
+        targets.setdefault((r["source"],r["predicate_uri"]),set()).add(r["target"])
+    conflicts = {k for k,ids in targets.items()
+                 if len(ids)>1 and schema["relationships"][k[1]].get("functional")}
+    for source,uri in sorted(conflicts):
+        errors.append(f"Conflicting functional relationship: {source} {uri}")
+    relationships = [r for r in relationships if (r["source"],r["predicate_uri"]) not in conflicts]
     return {"entities": entities, "relationships": relationships, "errors": errors}
