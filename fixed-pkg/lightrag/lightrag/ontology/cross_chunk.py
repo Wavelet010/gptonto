@@ -22,6 +22,9 @@ async def complete_relationships(doc_id, records, profiles, llm, concurrency=4, 
     catalog = {}
     for i, rec in enumerate(result):
         rec["cross_relationships"],rec["cross_errors"] = [],[]
+        rec["status"] = ("ROUTING_FAILED" if rec.get("errors") else
+                         "PARTIAL" if any(e.get("errors") for e in rec["extractions"]) else
+                         "COMPLETED" if rec["extractions"] else "NO_MATCH")
         for ex in rec["extractions"]:
             profile = by_id[ex["profile_id"]]
             for e in ex["entities"]:
@@ -90,6 +93,31 @@ async def complete_relationships(doc_id, records, profiles, llm, concurrency=4, 
                 rec["cross_errors"].append("Cross-chunk extraction failed: "+type(exc).__name__)
         if rec["cross_errors"]:
             rec["status"] = "PARTIAL"
+        elif rec["cross_relationships"] and rec.get("status") == "NO_MATCH":
+            rec["status"] = "COMPLETED"
     for start in range(0,len(result),max(1,concurrency)):
         await asyncio.gather(*(process(i,result[i]) for i in range(start,min(start+max(1,concurrency),len(result)))))
+    # Check functional predicates across the document, not just one model answer.
+    functional = {u for p in profiles for u,v in p["schema"]["relationships"].items() if v.get("functional")}
+    targets = {}
+    for i,rec in enumerate(result):
+        for ex in rec["extractions"]:
+            profile = by_id[ex["profile_id"]]
+            mapping = {e["local_id"]:entity_id(doc_id,i,profile,e) for e in ex["entities"]}
+            for r in ex["relationships"]:
+                if r["predicate_uri"] in functional:
+                    targets.setdefault((mapping[r["source"]],r["predicate_uri"]),set()).add(mapping[r["target"]])
+        for r in rec["cross_relationships"]:
+            if r["predicate_uri"] in functional:
+                targets.setdefault((r["source"],r["predicate_uri"]),set()).add(r["target"])
+    conflicts = {k for k,v in targets.items() if len(v)>1}
+    for rec in result:
+        keep = []
+        for r in rec["cross_relationships"]:
+            if (r["source"],r["predicate_uri"]) in conflicts:
+                rec["cross_errors"].append("Functional relationship conflict: "+r["predicate_uri"])
+                rec["status"] = "PARTIAL"
+            else:
+                keep.append(r)
+        rec["cross_relationships"] = keep
     return result

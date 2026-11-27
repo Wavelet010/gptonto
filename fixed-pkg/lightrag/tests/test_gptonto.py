@@ -157,3 +157,92 @@ def test_json_rejects_overflow():
     from lightrag.ontology.engine import parse_json
     with pytest.raises(ValueError):
         parse_json('{"value":1e999}')
+
+
+
+def test_cross_chunk_completion_and_delete(tmp_path):
+    from lightrag.ontology.cross_chunk import complete_relationships
+    from lightrag.ontology.storage import entity_id
+    from lightrag.ontology.browse import browse_instances
+    import json
+    schema,raw=fixture()
+    store=Store(tmp_path/"cross.sqlite3")
+    o=store.resource("ontology","设备",TTL,schema)
+    m=store.resource("prompt","设备","prompt",{"description":"设备","extraction":{},"identity_properties":{EX+"Device":EX+"deviceId",EX+"Gateway":EX+"gatewayId"}})
+    pid=store.profile("设备",o,m)
+    profiles=store.profiles(True)
+    chunks=[{"content":"设备D-001。"},{"content":"网关GW-01。"},{"content":"上述设备连接至该网关。"},{"content":"无关信息。"}]
+    records=[]
+    for i,c in enumerate(chunks):
+        if i<2:
+            entity=raw["entities"][i].copy()
+            entity["attributes"]=[a for a in entity["attributes"] if a["evidence"] in c["content"]]
+            ex={"profile_id":pid,**validate({"entities":[entity],"relationships":[]},schema,c["content"])}
+            records.append({"chunk":c,"routes":[{"id":pid}],"extractions":[ex],"errors":[]})
+        else:
+            records.append({"chunk":c,"routes":[],"extractions":[],"errors":[]})
+    did=store.new_document("a.txt",b"x",{},profiles)
+    a,b=[entity_id(did,i,profiles[0],records[i]["extractions"][0]["entities"][0]) for i in (0,1)]
+    calls=[]
+    async def llm(payload,system):
+        data=json.loads(payload)
+        calls.append(data["chunk_index"])
+        return json.dumps({"relationships":[{"source":a,"target":b,"predicate_uri":EX+"connectedTo","evidence":"上述设备连接至该网关"}]})
+    completed=asyncio.run(complete_relationships(did,records,profiles,llm))
+    assert calls==[2]
+    assert completed[2]["cross_relationships"][0]["target"]==b
+    assert completed[2]["status"]=="COMPLETED"
+    store.commit(did,completed,profiles)
+    data=store.export(did)
+    assert len(data["entities"])==2 and len(data["relationships"])==1
+    assert data["relationships"][0]["source"]==a
+    assert data["relationships"][0]["sources"][0]["evidence"]=="上述设备连接至该网关"
+    page=browse_instances(store,did,limit=1)
+    assert page["total"]==2 and len(page["entities"])==1 and not page["relationships"]
+    assert browse_instances(store,did,q="D-001")["entities"][0]["id"]==a
+    assert browse_instances(store,did,focus=a)["relationships"][0]["target"]==b
+    store.delete_document(did)
+    assert store.export()=={"entities":[],"relationships":[]}
+
+
+def test_external_parser_hooks(tmp_path,monkeypatch):
+    from lightrag.ontology.documents import parse_external
+    import lightrag.parser.registry as registry
+    import lightrag.sidecar as sidecar
+    class Parser:
+        async def download_into(self,raw,source,upload_name):
+            assert source.read_bytes()==b"example"
+            assert upload_name=="document.pdf"
+        def build_ir(self,raw,name):
+            assert name=="document.pdf"
+            return object()
+        def validate_ir(self,ir,**kwargs): pass
+    monkeypatch.setattr(registry,"get_parser",lambda name:Parser())
+    monkeypatch.setattr(registry,"engine_endpoint_configured",lambda name:True)
+    monkeypatch.setattr(sidecar,"write_sidecar",lambda *a,**kw:{"content":"解析结果","blocks_path":"blocks.jsonl"})
+    assert asyncio.run(parse_external("source.pdf",b"example","a"*32,tmp_path,"mineru"))==("解析结果","blocks.jsonl")
+
+
+def test_http_api_contract(tmp_path,monkeypatch):
+    import httpx
+    from lightrag.ontology.app import create_app
+    monkeypatch.setenv("GPTONTO_DB",str(tmp_path/"http.sqlite3"))
+    monkeypatch.setenv("GPTONTO_API_KEY","test-secret")
+    app=create_app()
+    paths=app.openapi()["paths"]
+    assert "/ontology-api/documents" in paths and "/ontology-api/export" in paths
+    assert "/ontology-api/instances" in paths and "/query" not in paths
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://test") as client:
+            assert (await client.get("/ontology-api/documents")).status_code==401
+            headers={"Authorization":"Bearer test-secret"}
+            r=await client.get("/ontology-api/documents",headers=headers)
+            assert r.status_code==200 and r.json()==[]
+            r=await client.get("/ontology-api/instances",headers=headers)
+            assert r.status_code==200 and r.json()["total"]==0
+            r=await client.get("/ontology-api/parsers",headers=headers)
+            assert r.status_code==200 and {p["id"] for p in r.json()}=={"native","legacy","mineru","docling"}
+            r=await client.post("/ontology-api/documents/preview",headers=headers,
+                files={"file":("demo.txt","一、设备\n设备D-001。\n二、状态\n正常。".encode())})
+            assert r.status_code==200 and r.json()["count"]==2
+    asyncio.run(run())
