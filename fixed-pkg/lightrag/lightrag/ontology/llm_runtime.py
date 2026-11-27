@@ -23,6 +23,10 @@ class SQLiteLLMCache:
                 return json.loads(row[0]) if row else None
         return await asyncio.to_thread(read)
 
+    async def index_done_callback(self):
+        # SQLite writes are committed immediately; original parser flush contract.
+        return None
+
     async def upsert(self, data):
         def write():
             with self.store.connect() as db:

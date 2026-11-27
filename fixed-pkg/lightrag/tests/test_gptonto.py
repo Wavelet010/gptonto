@@ -377,3 +377,48 @@ def test_normalized_and_repeated_evidence_positions():
     assert normalized["evidence_kind"]=="normalized_chunk"
     row={"id":"c","ord":0,"doc_id":"d","filename":"a.txt","data":normalized}
     assert evidence_view(row,"设备")["matches"]==[{"chunk_start":0,"chunk_end":2}]
+
+
+
+def test_native_docx_image_analysis_with_original_pipeline(tmp_path,monkeypatch):
+    import io
+    import json
+    from docx import Document
+    from PIL import Image
+    import lightrag.llm.openai as provider
+    from lightrag.ontology.documents import split_document
+    from lightrag.ontology.multimodal import create_multimodal_runtime
+    from lightrag.ontology.evidence import artifact_manifest
+    monkeypatch.setenv("VLM_MODEL","mock-vision")
+    monkeypatch.setenv("LLM_MODEL","mock-text")
+    monkeypatch.setenv("VLM_MIN_IMAGE_PIXEL","1")
+    monkeypatch.setenv("GPTONTO_LLM_CACHE","false")
+    image=io.BytesIO()
+    Image.new("RGB",(256,256),"white").save(image,format="PNG")
+    image.seek(0)
+    document=Document()
+    document.add_paragraph("一、设备示意图")
+    document.add_picture(image)
+    document.add_paragraph("设备图片说明。")
+    doc=io.BytesIO()
+    document.save(doc)
+    calls=[]
+    async def mock(*args,**kwargs):
+        calls.append(kwargs.get("image_inputs"))
+        return json.dumps({"name":"设备图片","description":"图中包含设备示意内容","type":"diagram"},ensure_ascii=False)
+    monkeypatch.setattr(provider,"openai_complete_if_cache",mock)
+    store=Store(tmp_path/"mm.sqlite3")
+    bundles=[]
+    async def run():
+        analyze,close=create_multimodal_runtime(store)
+        try:
+            return await split_document("image.docx",doc.getvalue(),"a"*32,
+                {"parser":"native","strategy":"H","size":2000,"overlap":100,
+                 "heading_depth":1,"modalities":["images"]},
+                artifact_sink=bundles.append,multimodal=analyze)
+        finally: await close()
+    chunks=asyncio.run(run())
+    assert calls and calls[0]
+    assert any(c.get("evidence_kind")=="multimodal_analysis" for c in chunks)
+    assert any(a["path"].endswith(".drawings.json") for a in artifact_manifest(bundles[0]))
+    assert any(a["path"].endswith(".png") for a in artifact_manifest(bundles[0]))
