@@ -271,3 +271,46 @@ def test_upstream_queue_and_cache(tmp_path,monkeypatch):
         finally:
             await close()
     asyncio.run(run())
+
+
+
+def test_preview_reuse_is_exact_and_one_use(tmp_path):
+    from lightrag.ontology.preview import PreviewCache
+    cache=PreviewCache(max_entries=2,max_bytes=10000)
+    opts={"parser":"legacy","strategy":"H","size":2000}
+    chunks=[{"content":"原文","chunk_order_index":0}]
+    token=cache.put("a"*32,"doc.txt",b"source",opts,chunks)
+    assert cache.take(token,"doc.txt",b"other",opts) is None
+    assert cache.take(token,"doc.txt",b"source",{**opts,"size":500}) is None
+    assert cache.take(token,"doc.txt",b"source",{**opts,"cross_chunk":True})==("a"*32,chunks)
+    assert cache.take(token,"doc.txt",b"source",opts) is None
+    store=Store(tmp_path/"preview.sqlite3")
+    did=store.new_document("doc.txt",b"source",opts,[],did="a"*32,prepared=chunks)
+    assert store.prepared_chunks(did)==chunks
+    store.commit(did,[{"chunk":chunks[0],"routes":[],"extractions":[],"errors":[]}],[])
+    assert store.prepared_chunks(did) is None
+
+
+def test_graph_adapter_parallel_directed_edges_and_scope(tmp_path):
+    from lightrag.ontology.graph_adapter import graph_data,graph_labels
+    schema,raw=fixture()
+    store=Store(tmp_path/"graph.sqlite3")
+    o=store.resource("ontology","设备",TTL,schema)
+    m=store.resource("prompt","设备","prompt",{"description":"设备"})
+    pid=store.profile("设备",o,m)
+    profiles=store.profiles(True)
+    # Same pair of entities, two distinct ontology predicates.
+    valid=validate(raw,schema,TEXT)
+    rec={"chunk":{"content":TEXT},"routes":[{"id":pid}],"errors":[],"extractions":[{"profile_id":pid,**valid}]}
+    did=store.new_document("one.txt",b"one",{},profiles)
+    did2=store.new_document("two.txt",b"two",{},profiles)
+    store.commit(did,[rec],profiles)
+    store.commit(did2,[rec],profiles)
+    data=graph_data(store,document_id=did)
+    assert len(data["nodes"])==2 and len(data["edges"])==2
+    assert {e["type"] for e in data["edges"]}=={EX+"connectedTo",EX+"reportsTo"}
+    assert len({(e["source"],e["target"]) for e in data["edges"]})==1
+    assert len(graph_labels(store,"设备",document_id=did))==1
+    label=graph_labels(store,"设备",document_id=did)[0]
+    assert len(graph_data(store,label,1,10,did)["edges"])==2
+    assert len(graph_data(store,"*",1,1,did)["nodes"])==1

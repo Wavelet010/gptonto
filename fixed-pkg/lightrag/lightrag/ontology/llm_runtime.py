@@ -9,11 +9,14 @@ import time
 
 
 class SQLiteLLMCache:
-    def __init__(self, store):
+    def __init__(self, store, bypass_reads=False):
         self.store = store
+        self.bypass_reads = bypass_reads
         self.global_config = {"enable_llm_cache_for_entity_extract": True}
 
     async def get_by_id(self, key):
+        if self.bypass_reads:
+            return None
         def read():
             with self.store.connect() as db:
                 row = db.execute("SELECT data FROM llm_cache WHERE id=?",(key,)).fetchone()
@@ -36,6 +39,7 @@ def create_llm_runtime(store):
     concurrency = max(1,int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")))
     queue_size = max(1,int(os.getenv("GPTONTO_LLM_QUEUE_SIZE","1000")))
     cache = SQLiteLLMCache(store)
+    fresh_cache = SQLiteLLMCache(store,bypass_reads=True)
     enabled = os.getenv("GPTONTO_LLM_CACHE","true").lower() in {"1","true","yes"}
     model = os.getenv("LLM_MODEL")
     host = os.getenv("LLM_BINDING_HOST")
@@ -59,7 +63,7 @@ def create_llm_runtime(store):
 
     async def invoke(prompt,system,*,fresh=False):
         output,_ = await use_llm_func_with_cache(prompt,provider,
-            llm_response_cache=cache if enabled and not fresh else None,
+            llm_response_cache=(fresh_cache if fresh else cache) if enabled else None,
             system_prompt=system,cache_type="gptonto_extract_v1",
             llm_cache_identity={"binding":"openai","model":model,"host":host})
         return output

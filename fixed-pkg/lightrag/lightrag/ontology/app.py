@@ -46,6 +46,8 @@ class Enabled(BaseModel):
 def create_app():
     store = Store(os.getenv("GPTONTO_DB","data/gptonto.sqlite3"))
     tasks = set()
+    from .preview import PreviewCache
+    previews = PreviewCache()
     from .llm_runtime import create_llm_runtime
     llm, fresh_llm, close_llm, llm_stats = create_llm_runtime(store)
     document_semaphore = asyncio.Semaphore(max(1,int(os.getenv("GPTONTO_DOCUMENT_CONCURRENCY","2"))))
@@ -80,7 +82,9 @@ def create_app():
                                 merged = previous
                         store.commit(did,merged,doc["snapshot"],diagnostics=diagnostics)
                         return
-                chunks = await split_document(doc["filename"],doc["source"],did,doc["options"])
+                chunks = store.prepared_chunks(did)
+                if chunks is None:
+                    chunks = await split_document(doc["filename"],doc["source"],did,doc["options"])
                 if not chunks: raise ValueError("No usable chunks")
                 records = await extract_chunks(chunks,doc["snapshot"],llm,
                     concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")))
@@ -191,7 +195,7 @@ def create_app():
                 for name in ("native","legacy","mineru","docling")]
 
     @api.post("/documents",status_code=202)
-    async def upload_document(file:UploadFile=File(...), options:str=Form("{}")):
+    async def upload_document(file:UploadFile=File(...), options:str=Form("{}"), preview_id:str | None=Form(None)):
         try: opts = Options.model_validate_json(options)
         except ValueError as exc: raise HTTPException(422,str(exc)) from exc
         profiles = store.profiles(enabled_only=True)
@@ -203,9 +207,14 @@ def create_app():
         if not profiles: raise HTTPException(422,"No enabled extraction profiles")
         if not os.getenv("LLM_MODEL"): raise HTTPException(503,"LLM_MODEL not configured")
         data = await read(file,32*1024*1024)
-        did = store.new_document(Path(file.filename or "document.txt").name,data,opts.model_dump(),profiles)
+        filename=Path(file.filename or "document.txt").name
+        options_dict=opts.model_dump()
+        prepared=previews.take(preview_id,filename,data,options_dict) if preview_id else None
+        did = store.new_document(filename,data,options_dict,profiles,
+                                 did=prepared[0] if prepared else None,
+                                 prepared=prepared[1] if prepared else None)
         enqueue(did)
-        return {"id":did,"status":"QUEUED"}
+        return {"id":did,"status":"QUEUED","preview_reused":bool(prepared)}
 
     @api.post("/documents/preview")
     async def preview(file:UploadFile=File(...), options:str=Form("{}")):
@@ -213,8 +222,11 @@ def create_app():
         try:
             opts = Options.model_validate_json(options)
             data = await read(file,32*1024*1024)
-            chunks = await split_document(Path(file.filename or "document.txt").name,data,uuid.uuid4().hex,opts.model_dump())
-            return {"count":len(chunks),"chunks":chunks}
+            filename=Path(file.filename or "document.txt").name
+            did=uuid.uuid4().hex
+            chunks = await split_document(filename,data,did,opts.model_dump())
+            token=previews.put(did,filename,data,opts.model_dump(),chunks)
+            return {"count":len(chunks),"chunks":chunks,"preview_id":token}
         except HTTPException: raise
         except Exception as exc: raise HTTPException(422,type(exc).__name__+": "+str(exc)[:300]) from exc
 
@@ -241,9 +253,9 @@ def create_app():
         return {"deleted":id}
 
     @api.get("/graph/labels")
-    async def graph_labels(q:str=Query("",max_length=300),limit:int=Query(100,ge=1,le=1000)):
+    async def graph_labels(q:str=Query("",max_length=300),limit:int=Query(100,ge=1,le=1000),document_id:str | None=None):
         from .graph_adapter import graph_labels
-        return await asyncio.to_thread(graph_labels,store,q,limit)
+        return await asyncio.to_thread(graph_labels,store,q,limit,document_id)
 
     @api.get("/graph")
     async def graph(label:str=Query("*",max_length=500),max_depth:int=Query(2,ge=1,le=8),

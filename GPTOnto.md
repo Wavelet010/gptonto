@@ -58,3 +58,17 @@ python -m pytest tests/test_gptonto.py -q
 - 上传文档可选择是否启用跨块关系补全（默认启用）。首轮抽取结束后，针对含显式实体名称/编号或指代信号的文本块，选择同文档候选实体，最多 40 个；指代候选优先来自前 5 块。第二轮仅补关系，不创建新实体，使用当前块证据及本体 domain/range 校验。补全失败标记部分失败；重试第二阶段失败保留旧文档结果。此为启发式补全，不保证覆盖所有跨章节指代，也不做跨文档补全。
 - 可选择 auto、native、legacy、mineru、docling 解析器。后两者复用原远程解析客户端和 IR/sidecar 写入，需配置可信服务端点；暂无真实服务测试，图片描述及独立资产展示未接入。预览与上传使用相同解析配置，但会分别解析。
 - 实例浏览接口 GET /ontology-api/instances 支持 document_id、q、class_uri、offset、limit（最多 100）、focus（直接邻域）。搜索匹配名称、ID、属性值；图谱仅展示本页实例间的关系，双击节点展开邻域，滚轮缩放、拖动空白平移。完整 JSON/TTL 导出独立于分页。当前仍是独立 HTML 界面，不是原 React UI 的完整迁移。
+
+## 复用原 LightRAG 组件（第四轮）
+
+- 文档解析通过原 Parser Registry / BaseParser.parse 生命周期；GPTOnto 只提供源文件和持久化适配，不重复实现原生/外部解析流程。预览返回一次性 preview_id；同文件、同解析/分块配置提交时复用分块，过期或配置变更自动重新解析。已提交预览分块会持久化至任务完成。预览缓存最多 8 条、64 MiB、15 分钟，服务重启后预览失效。
+- 模型请求复用原 priority_limit_async_func_call（队列、超时、取消）和 use_llm_func_with_cache（缓存键、输出清理）；SQLite 仅做 KV 适配，按模型、端点、提示词和 Schema 版本隔离。明确重试绕过缓存读取并刷新格式正确的响应。缓存为语法层缓存，语义仍按本体校验；可通过 GPTONTO_LLM_CACHE=false 关闭。/ontology-api/runtime 提供队列状态。
+- 原 React + Sigma 图谱通过独立构建模式复用，不加载问答页面。执行下面的构建命令后重启服务，访问 /graph-ui/（也可从主页进入）：
+
+```bash
+cd fixed-pkg/lightrag/lightrag_webui
+npm ci --legacy-peer-deps
+npm run build -- --mode gptonto
+```
+
+需要 Node.js 22.12+ 或与原项目兼容的版本。产物位于 lightrag/ontology/graph_webui，Dockerfile.gptonto 会随源码一起复制；离线部署可提前构建并传输该目录，无须在服务器安装 Node.js。未构建时基础 SVG 图谱仍可用。原图谱仅开放只读操作，本体实体使用稳定 ID，采用 MultiDirectedGraph 保留有向并行边，原 LightRAG 普通构建不改变边语义。图谱接口按文档/节点/深度限制读取 SQLite，不加载全库。尚需浏览器实际验收，文档管理 React 页面、原始图像资产持久化及视觉模型仍待迁移。

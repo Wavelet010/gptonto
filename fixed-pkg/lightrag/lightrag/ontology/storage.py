@@ -48,6 +48,10 @@ class Store:
                 options TEXT NOT NULL, snapshot TEXT NOT NULL, status TEXT NOT NULL,
                 error TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS prepared_chunks (
+                doc_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+                data TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS chunks (
                 id TEXT PRIMARY KEY, doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
                 ord INTEGER NOT NULL, data TEXT NOT NULL, result TEXT NOT NULL, UNIQUE(doc_id,ord)
@@ -167,12 +171,19 @@ class Store:
             if not db.execute(f"UPDATE {table} SET enabled=? WHERE id=?", (int(enabled),id)).rowcount:
                 raise KeyError(id)
 
-    def new_document(self, filename, source, options, snapshot):
-        did = uuid.uuid4().hex
+    def new_document(self, filename, source, options, snapshot, did=None, prepared=None):
+        did = did or uuid.uuid4().hex
         with self.connect() as db:
             db.execute("INSERT INTO documents(id,filename,source,options,snapshot,status) VALUES(?,?,?,?,?,?)",
                        (did,filename,source,dump(options),dump(snapshot),"QUEUED"))
+            if prepared is not None:
+                db.execute("INSERT INTO prepared_chunks VALUES(?,?)",(did,dump(prepared)))
         return did
+
+    def prepared_chunks(self,did):
+        with self.connect() as db:
+            row=db.execute("SELECT data FROM prepared_chunks WHERE doc_id=?",(did,)).fetchone()
+            return json.loads(row[0]) if row else None
 
     def document(self, did):
         with self.connect() as db:
@@ -246,6 +257,7 @@ class Store:
             db.execute("DELETE FROM retry_diagnostics WHERE doc_id=?", (did,))
             db.executemany("INSERT INTO retry_diagnostics VALUES(?,?,?)",
                            [(did,i,dump(r)) for i,r in diagnostics.items()])
+            db.execute("DELETE FROM prepared_chunks WHERE doc_id=?",(did,))
             db.execute("DELETE FROM chunks WHERE doc_id=?", (did,))
             for order, rec in enumerate(records):
                 cid = digest(did, order)

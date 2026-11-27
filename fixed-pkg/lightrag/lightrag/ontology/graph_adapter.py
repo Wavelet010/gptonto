@@ -7,13 +7,14 @@ import json
 import re
 
 
-def graph_labels(store,q="",limit=100):
+def graph_labels(store,q="",limit=100,document_id=None):
     with store.connect() as db:
+        scope=" AND c.doc_id=?" if document_id else ""
         rows=db.execute("""SELECT e.id,MIN(s.name) AS name FROM entities e
-            JOIN entity_sources s ON s.entity_id=e.id
-            WHERE instr(lower(s.name),lower(?))>0 OR instr(lower(e.id),lower(?))>0
-               OR EXISTS(SELECT 1 FROM attributes a WHERE a.entity_id=e.id AND instr(lower(a.value),lower(?))>0)
-            GROUP BY e.id ORDER BY name,e.id LIMIT ?""",(q,q,q,limit))
+            JOIN entity_sources s ON s.entity_id=e.id JOIN chunks c ON c.id=s.chunk_id
+            WHERE (instr(lower(s.name),lower(?))>0 OR instr(lower(e.id),lower(?))>0
+               OR EXISTS(SELECT 1 FROM attributes a WHERE a.entity_id=e.id AND a.chunk_id=s.chunk_id AND instr(lower(a.value),lower(?))>0))"""+scope+
+            " GROUP BY e.id ORDER BY name,e.id LIMIT ?",[q,q,q]+([document_id] if document_id else [])+[limit])
         return [f'{r["name"]} [{r["id"]}]' for r in rows]
 
 
