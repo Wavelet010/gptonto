@@ -1,6 +1,5 @@
-"""Read adapter for the original React DocumentManager's pagination contract."""
+"""Read adapter for original React DocumentManager with SQL-side pagination."""
 import json
-from collections import Counter
 
 
 def document_page(store,body,phases):
@@ -9,32 +8,37 @@ def document_page(store,body,phases):
         size=max(1,min(200,int(body.get("page_size",10))))
     except (TypeError,ValueError):
         page,size=1,10
-    mapping={"QUEUED":"pending","PROCESSING":"processing","COMPLETED":"processed",
-             "FAILED":"failed","PARTIAL":"failed","CANCELLED":"failed"}
-    def state(row):
-        phase=phases.get(row["id"],{}).get("phase")
-        if row["status"]=="PROCESSING":
-            return {"PARSING":"parsing","ANALYZING":"analyzing"}.get(phase,"processing")
-        return mapping.get(row["status"],"failed")
+    filters=body.get("status_filters") or ([body["status_filter"]] if body.get("status_filter") else [])
+    if not isinstance(filters,list) or any(x not in {"pending","parsing","analyzing","processing","processed","failed","preprocessed"} for x in filters):
+        raise ValueError("Invalid status filters")
+    field={"id":"id","file_path":"filename","created_at":"created_at","updated_at":"updated_at"}.get(body.get("sort_field"),"created_at")
+    direction="ASC" if body.get("sort_direction")=="asc" else "DESC"
     with store.connect() as db:
         db.execute("BEGIN")
-        rows=[dict(r) for r in db.execute("""SELECT d.id,d.filename,d.created_at,d.status,d.error,
-                length(d.source) AS content_length,d.options,
-                (SELECT COUNT(*) FROM chunks c WHERE c.doc_id=d.id) AS chunks_count
-                FROM documents d""")]
-    counts=Counter(state(r) for r in rows)
-    filters=body.get("status_filters") or ([body["status_filter"]] if body.get("status_filter") else [])
-    if filters: rows=[r for r in rows if state(r) in filters]
-    field={"id":"id","file_path":"filename","created_at":"created_at","updated_at":"created_at"}.get(body.get("sort_field"),"created_at")
-    rows.sort(key=lambda r:(phases.get(r["id"],{}).get("updated_at",r[field]) if body.get("sort_field")=="updated_at" else r[field],r["id"]),reverse=body.get("sort_direction","desc")!="asc")
-    count=len(rows); total=(count+size-1)//size
-    docs=[]
-    for r in rows[(page-1)*size:page*size]:
-        info=phases.get(r["id"],{})
-        docs.append({"id":r["id"],"file_path":r["filename"],"content_summary":r["filename"],
-                     "content_length":r["content_length"],"status":state(r),"created_at":r["created_at"],
-                     "updated_at":info.get("updated_at",r["created_at"]),"chunks_count":r["chunks_count"],
-                     "error_msg":r["error"] or ("部分抽取存在校验错误" if r["status"]=="PARTIAL" else ""),
-                     "metadata":{"gptonto_status":r["status"],"phase":info,"options":json.loads(r["options"])}})
-    return {"documents":docs,"pagination":{"page":page,"page_size":size,"total_count":count,
-             "total_pages":total,"has_next":page<total,"has_prev":page>1},"status_counts":dict(counts)}
+        db.execute("CREATE TEMP TABLE live_phase(id TEXT PRIMARY KEY, phase TEXT, updated_at TEXT)")
+        db.executemany("INSERT INTO live_phase VALUES(?,?,?)",[(k,v.get("phase"),v.get("updated_at")) for k,v in phases.items()])
+        source="""SELECT d.id,d.filename,d.created_at,COALESCE(p.updated_at,d.updated_at,d.created_at) AS updated_at,
+               d.status,d.error,d.options,length(d.source) AS content_length,
+               CASE WHEN d.status='QUEUED' THEN 'pending'
+                    WHEN d.status='COMPLETED' THEN 'processed'
+                    WHEN d.status='PROCESSING' AND p.phase='PARSING' THEN 'parsing'
+                    WHEN d.status='PROCESSING' AND p.phase='ANALYZING' THEN 'analyzing'
+                    WHEN d.status='PROCESSING' THEN 'processing' ELSE 'failed' END AS ui_status
+               FROM documents d LEFT JOIN live_phase p ON p.id=d.id"""
+        cte="WITH docs AS ("+source+") "
+        counts={r[0]:r[1] for r in db.execute(cte+"SELECT ui_status,COUNT(*) FROM docs GROUP BY ui_status")}
+        where=" WHERE ui_status IN ("+",".join("?" for _ in filters)+")" if filters else ""
+        count=db.execute(cte+"SELECT COUNT(*) FROM docs"+where,filters).fetchone()[0]
+        total=(count+size-1)//size
+        rows=db.execute(cte+"SELECT docs.*,(SELECT COUNT(*) FROM chunks c WHERE c.doc_id=docs.id) AS chunks_count FROM docs"+where+
+                        f" ORDER BY {field} {direction},id {direction} LIMIT ? OFFSET ?",filters+[size,(page-1)*size])
+        docs=[]
+        for r in rows:
+            info=phases.get(r["id"],{})
+            docs.append({"id":r["id"],"file_path":r["filename"],"content_summary":r["filename"],
+                         "content_length":r["content_length"],"status":r["ui_status"],"created_at":r["created_at"],
+                         "updated_at":r["updated_at"],"chunks_count":r["chunks_count"],
+                         "error_msg":r["error"] or ("Partial extraction; review validation errors" if r["status"]=="PARTIAL" else ""),
+                         "metadata":{"gptonto_status":r["status"],"phase":info,"options":json.loads(r["options"])}})
+        return {"documents":docs,"pagination":{"page":page,"page_size":size,"total_count":count,
+                 "total_pages":total,"has_next":page<total,"has_prev":page>1},"status_counts":counts}

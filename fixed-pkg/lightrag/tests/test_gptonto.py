@@ -347,9 +347,10 @@ def test_document_ui_contract_and_atomic_delete(tmp_path):
     b=store.new_document("b.txt",b"b",{},[])
     store.status(a,"COMPLETED")
     store.status(b,"PROCESSING")
-    page=document_page(store,{"page_size":1},{"b":{"phase":"ANALYZING"}})
+    page=document_page(store,{"page_size":1},{b:{"phase":"ANALYZING"}})
     assert page["pagination"]["total_count"]==2
-    assert page["status_counts"]["processed"]==1
+    assert page["status_counts"]["processed"]==1 and page["status_counts"]["analyzing"]==1
+    assert len(document_page(store,{"status_filters":["processed"]},{})["documents"])==1
     with pytest.raises(ValueError): store.delete_documents([a,b])
     assert len(store.documents())==2
     store.status(b,"CANCELLED")

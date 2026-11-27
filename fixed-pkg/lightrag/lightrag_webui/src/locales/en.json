@@ -523,6 +523,16 @@
     "lastPage": "Last Page"
   },
   "gptonto": {
+    "ontologies": "Ontologies",
+    "prompts": "Prompts",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "disable": "Disable",
+    "enable": "Enable",
+    "name": "Name",
+    "dependencies": "Dependencies",
+    "upload": "Upload",
+    "create": "Create",
     "heading": "H Numbered headings",
     "parser": "Parser",
     "parserParams": "Parser parameters (JSON)",

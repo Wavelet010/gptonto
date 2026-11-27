@@ -99,6 +99,9 @@ class Store:
             CREATE INDEX IF NOT EXISTS ix_rel_target ON relationships(target);
             CREATE INDEX IF NOT EXISTS ix_relation_sources_chunk ON relation_sources(chunk_id);
             """)
+            if "updated_at" not in {r[1] for r in db.execute("PRAGMA table_info(documents)")}:
+                db.execute("ALTER TABLE documents ADD COLUMN updated_at TEXT")
+                db.execute("UPDATE documents SET updated_at=created_at")
 
     @contextmanager
     def connect(self):
@@ -218,15 +221,15 @@ class Store:
 
     def status(self, did, status, error=None):
         with self.connect() as db:
-            db.execute("UPDATE documents SET status=?,error=? WHERE id=?", (status,error,did))
+            db.execute("UPDATE documents SET status=?,error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (status,error,did))
 
     def recover(self):
         with self.connect() as db:
-            db.execute("UPDATE documents SET status='FAILED',error='Interrupted; retry document' WHERE status IN ('QUEUED','PROCESSING')")
+            db.execute("UPDATE documents SET status='FAILED',error='Interrupted; retry document',updated_at=CURRENT_TIMESTAMP WHERE status IN ('QUEUED','PROCESSING')")
 
     def retry(self, did):
         with self.connect() as db:
-            if not db.execute("UPDATE documents SET status='QUEUED',error=NULL WHERE id=? AND status NOT IN ('PROCESSING','QUEUED')",(did,)).rowcount:
+            if not db.execute("UPDATE documents SET status='QUEUED',error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('PROCESSING','QUEUED')",(did,)).rowcount:
                 raise ValueError("Document missing or already processing")
 
     @staticmethod
@@ -348,7 +351,7 @@ class Store:
                     e.get("errors") and not e.get("entities") for e in r["extractions"]))
                 for r in records)
             state = "FAILED" if all_failed else "PARTIAL" if partial else "COMPLETED"
-            db.execute("UPDATE documents SET status=?,error=? WHERE id=?",
+            db.execute("UPDATE documents SET status=?,error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                        (state,"All chunks failed; see extraction details" if all_failed else None,did))
 
     def chunks(self, did):

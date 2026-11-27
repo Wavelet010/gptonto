@@ -276,7 +276,8 @@ def create_app():
     @api.post("/documents/paginated")
     async def paginated(body:dict):
         from .document_api import document_page
-        return await asyncio.to_thread(document_page,store,body,dict(phases))
+        try: return await asyncio.to_thread(document_page,store,body,dict(phases))
+        except ValueError as exc: raise HTTPException(422,str(exc)) from exc
 
     @api.get("/documents/status_counts")
     async def status_counts():

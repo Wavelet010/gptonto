@@ -523,6 +523,16 @@
     "lastPage": "末页"
   },
   "gptonto": {
+    "ontologies": "本体管理",
+    "prompts": "提示词管理",
+    "enabled": "启用",
+    "disabled": "停用",
+    "disable": "停用",
+    "enable": "启用",
+    "name": "名称",
+    "dependencies": "依赖本体",
+    "upload": "上传",
+    "create": "创建",
     "heading": "H 编号标题分块",
     "parser": "文档解析器",
     "parserParams": "解析器参数（JSON）",
