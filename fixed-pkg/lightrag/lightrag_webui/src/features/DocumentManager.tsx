@@ -14,6 +14,8 @@ import {
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/Card'
 import EmptyCard from '@/components/ui/EmptyCard'
 import Checkbox from '@/components/ui/Checkbox'
+import { ontologyGraphMode, ontologyPost } from '@/lib/ontologyGraph'
+import OntologyEvidenceDialog from '@/components/documents/OntologyEvidenceDialog'
 import UploadDocumentsDialog from '@/components/documents/UploadDocumentsDialog'
 import ClearDocumentsDialog from '@/components/documents/ClearDocumentsDialog'
 import DeleteDocumentsDialog from '@/components/documents/DeleteDocumentsDialog'
@@ -1377,12 +1379,12 @@ export default function DocumentManager() {
           <div className="flex gap-2">
             <Button
               variant="outline"
-              onClick={scanDocuments}
+              onClick={ontologyGraphMode?()=>{ontologyPost('documents/reprocess_failed').then(()=>refreshDocumentsThrottled()).catch(e=>toast.error(String(e)))}:scanDocuments}
               side="bottom"
               tooltip={t('documentPanel.documentManager.scanTooltip')}
               size="sm"
             >
-              <RefreshCwIcon /> {t('documentPanel.documentManager.scanButton')}
+              <RefreshCwIcon /> {ontologyGraphMode?t('gptonto.retryFailed','Retry failed'):t('documentPanel.documentManager.scanButton')}
             </Button>
             <Button
               variant="outline"
@@ -1685,6 +1687,7 @@ export default function DocumentManager() {
                                 })()}
 
                                 {hasDocumentDetails(doc) && <DocumentStatusDetailsDialog doc={doc} />}
+                                {ontologyGraphMode&&<><OntologyEvidenceDialog docId={doc.id} filename={doc.file_path}/>{["failed","processed"].includes(doc.status)&&<Button size="sm" variant="outline" onClick={()=>{if(window.confirm(t("gptonto.retryConfirm","Re-extract all chunks using the saved document and ontology configuration?")))ontologyPost("documents/"+doc.id+"/retry?mode=all").then(()=>refreshDocumentsThrottled()).catch(e=>toast.error(String(e)))}}>{t("gptonto.retryAll","Re-extract")}</Button>}</>}
                               </div>
                             </TableCell>
                             <TableCell>{doc.content_length ?? '-'}</TableCell>

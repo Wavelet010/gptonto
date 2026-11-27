@@ -1,0 +1,61 @@
+import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
+import DocumentManager from '@/features/DocumentManager'
+import OntologyResources from '@/features/OntologyResources'
+import AppSettings from '@/components/AppSettings'
+import Button from '@/components/ui/Button'
+import OntologyInstances from '@/features/OntologyInstances'
+import { useBackendState } from '@/stores/state'
+import '@/lib/extensions'
+import { Toaster } from 'sonner'
+import ThemeProvider from '@/components/ThemeProvider'
+import GraphViewer from '@/features/GraphViewer'
+import { useSettingsStore } from '@/stores/settings'
+import { useGraphStore } from '@/stores/graph'
+import { configureOntologyGraph, ontologyGraphRequest, ontologyDownload } from '@/lib/ontologyGraph'
+
+export default function OntologyGraphApp() {
+  const {t}=useTranslation()
+  const [tab,setTab]=useState<'documents'|'knowledge-graph'|'resources'|'instances'>('documents')
+  const [key, setKey] = useState('')
+  const [documentId, setDocumentId] = useState('')
+  const [documents, setDocuments] = useState<{id:string;filename:string}[]>([])
+  const [ready, setReady] = useState(false)
+  const [error, setError] = useState('')
+  const [busy,setBusy] = useState(false)
+  const [revision,setRevision] = useState(0)
+  const connect = async (doc: string) => {
+    setBusy(true); setError('')
+    try {
+      configureOntologyGraph(key,doc)
+      const list = await ontologyGraphRequest<{id:string;filename:string}[]>('documents')
+      setDocuments(list)
+      setDocumentId(doc)
+      useGraphStore.getState().reset()
+      useSettingsStore.getState().setCurrentTab(tab==='knowledge-graph'?'knowledge-graph':'documents')
+      useSettingsStore.getState().setBackendMaxGraphNodes(1000)
+      useSettingsStore.getState().setQueryLabel('*')
+      setReady(true)
+      setRevision(x=>x+1)
+    } catch(e) { setReady(false);setError(String(e)) }
+    finally { setBusy(false) }
+  }
+  useEffect(()=>{if(!ready)return;useBackendState.getState().check();const timer=setInterval(()=>useBackendState.getState().check(),5000);return()=>clearInterval(timer)},[ready])
+  const changeTab=(next:'documents'|'knowledge-graph'|'resources'|'instances')=>{setTab(next);useSettingsStore.getState().setCurrentTab(next==='knowledge-graph'?'knowledge-graph':'documents');if(next==='knowledge-graph'||next==='instances')void ontologyGraphRequest<{id:string;filename:string}[]>('documents').then(list=>{setDocuments(list);if(documentId&&!list.some(d=>d.id===documentId)){setDocumentId('');configureOntologyGraph(key,'');useGraphStore.getState().reset();setRevision(x=>x+1)}}).catch(e=>setError(String(e)))}
+  return <ThemeProvider>
+    <main className="h-screen flex flex-col overflow-hidden">
+      <header className="flex flex-wrap items-center gap-3 border-b p-3">
+        
+        <strong>GPTOnto</strong><AppSettings/>
+        {ready&&<><button className="border rounded px-3 py-1" onClick={()=>changeTab("resources")}>{t("gptonto.resources","Ontology / prompt management")}</button><button className="border rounded px-3 py-1" onClick={()=>changeTab("documents")}>{t("gptonto.documents","Documents")}</button><Button variant={tab==="instances"?"secondary":"outline"} onClick={()=>changeTab("instances")}>{t("gptonto.instances","Instances")}</Button><button className="border rounded px-3 py-1" onClick={()=>changeTab("knowledge-graph")}>{t("gptonto.graph","Knowledge graph")}</button></>}
+        <input className="border rounded px-2 py-1" type="password" value={key} onChange={e=>setKey(e.target.value)} placeholder={t("gptonto.apiKey","API Key (if enabled)")} />
+        <button className="border rounded px-3 py-1" disabled={busy} onClick={()=>connect(documentId)}>{t("gptonto.connect","Connect / refresh")}</button>
+        {ready && (tab==='knowledge-graph'||tab==='instances') && <select className="border rounded px-2 py-1" value={documentId} onChange={e=>connect(e.target.value)} disabled={busy}><option value="">{t("gptonto.allDocs","All documents")}</option>{documents.map(d=><option key={d.id} value={d.id}>{d.filename}</option>)}</select>}
+        {ready&&(tab==="knowledge-graph"||tab==="instances")&&<>{(["json","ttl"] as const).map(format=><Button key={format} size="sm" variant="outline" onClick={()=>ontologyDownload("export","gptonto."+format,{format,...(documentId?{document_id:documentId}:{})}).catch(e=>setError(String(e)))}>{t("gptonto.export","Export")} {format.toUpperCase()}</Button>)}</>}
+        {error && <span role="alert" className="text-red-600">{error}</span>}
+      </header>
+      <div className="relative flex-1 min-h-0">{ready ? (tab==='documents'?<DocumentManager key={'doc-'+revision}/>:tab==='resources'?<OntologyResources/>:tab==='instances'?<OntologyInstances key={revision} documentId={documentId}/>:<GraphViewer key={revision}/>) : <p className="p-6">{t("gptonto.connectHint","Connect using the API key if configured. Retrieval is disabled.")}</p>}</div>
+    </main>
+    <Toaster position="bottom-center" richColors closeButton/>
+  </ThemeProvider>
+}

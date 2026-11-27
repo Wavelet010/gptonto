@@ -1,4 +1,5 @@
 import axios, { AxiosError } from 'axios'
+import { ontologyGraphMode, ontologyGraphRequest, ontologyPost, ontologyUpload } from '@/lib/ontologyGraph'
 import { backendBaseUrl, popularLabelsDefaultLimit, searchLabelsDefaultLimit } from '@/lib/constants'
 import { errorMessage } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
@@ -166,6 +167,7 @@ export type TextChunkingStrategy =
   | 'semantic_vector'
   | 'paragraph_semantic'
   | 'structure_aware'
+  | 'numbered_heading'
 
 export type TextChunkingConfig = {
   strategy: TextChunkingStrategy
@@ -553,21 +555,25 @@ export const queryGraphs = async (
   maxDepth: number,
   maxNodes: number
 ): Promise<LightragGraphType> => {
+  if (ontologyGraphMode) return ontologyGraphRequest<LightragGraphType>('graph', {label,max_depth:Math.max(1,Math.min(maxDepth,8)),max_nodes:Math.max(1,Math.min(maxNodes,1000))})
   const response = await axiosInstance.get(`/graphs?label=${encodeURIComponent(label)}&max_depth=${maxDepth}&max_nodes=${maxNodes}`)
   return response.data
 }
 
 export const getGraphLabels = async (): Promise<string[]> => {
+  if (ontologyGraphMode) return ontologyGraphRequest<string[]>('graph/labels')
   const response = await axiosInstance.get('/graph/label/list')
   return response.data
 }
 
 export const getPopularLabels = async (limit: number = popularLabelsDefaultLimit): Promise<string[]> => {
+  if (ontologyGraphMode) return ontologyGraphRequest<string[]>('graph/labels', {limit:Math.min(limit,1000)})
   const response = await axiosInstance.get(`/graph/label/popular?limit=${limit}`)
   return response.data
 }
 
 export const searchLabels = async (query: string, limit: number = searchLabelsDefaultLimit): Promise<string[]> => {
+  if (ontologyGraphMode) return ontologyGraphRequest<string[]>('graph/labels', {q:query,limit:Math.min(limit,1000)})
   const response = await axiosInstance.get(`/graph/label/search?q=${encodeURIComponent(query)}&limit=${limit}`)
   return response.data
 }
@@ -576,6 +582,10 @@ export const checkHealth = async (): Promise<
   LightragStatus | { status: 'error'; message: string }
 > => {
   try {
+    if (ontologyGraphMode) {
+      const status=await ontologyGraphRequest<PipelineStatusResponse>('documents/pipeline_status')
+      return {status:'healthy',working_directory:'',input_directory:'',configuration:{max_graph_nodes:'1000'},pipeline_busy:status.busy,pipeline_active:status.busy} as LightragStatus
+    }
     const response = await axiosInstance.get('/health')
     return response.data
   } catch (error) {
@@ -597,11 +607,13 @@ export const scanNewDocuments = async (): Promise<ScanResponse> => {
 }
 
 export const reprocessFailedDocuments = async (): Promise<ReprocessFailedResponse> => {
+  if (ontologyGraphMode) return ontologyPost<ReprocessFailedResponse>('documents/reprocess_failed')
   const response = await axiosInstance.post('/documents/reprocess_failed')
   return response.data
 }
 
 export const getDocumentsScanProgress = async (): Promise<LightragDocumentsScanProgress> => {
+  if (ontologyGraphMode) return {is_scanning:false,current_file:'',indexed_count:0,total_files:0,progress:0}
   const response = await axiosInstance.get('/documents/scan-progress')
   return response.data
 }
@@ -904,10 +916,21 @@ export const uploadDocument = async (
   onUploadProgress?: (percentCompleted: number) => void,
   chunking?: string,
   profile?: string,
-  skipGraph?: boolean
+  skipGraph?: boolean,
+  ontologyOptions?: Record<string,unknown>,
+  previewId?: string
 ): Promise<DocActionResponse> => {
   const formData = new FormData()
   formData.append('file', file)
+  if (ontologyGraphMode) {
+    const config=chunking ? JSON.parse(chunking) : {strategy:'numbered_heading',params:{}}
+    const strategies:Record<string,string>={fixed_token:'F',recursive_character:'R',semantic_vector:'V',paragraph_semantic:'P',structure_aware:'S',numbered_heading:'H'}
+    formData.append('options',JSON.stringify({strategy:strategies[config.strategy]||'H',chunk_params:config.params,...ontologyOptions}))
+    if(previewId)formData.append('preview_id',previewId)
+    const data=await ontologyUpload<{id:string}>('documents',formData,onUploadProgress)
+    onUploadProgress?.(100)
+    return {status:'success',message:'Queued',track_id:data.id}
+  }
   if (chunking) formData.append('chunking', chunking)
   if (profile) formData.append('profile', profile)
   if (skipGraph) formData.append('skip_graph', 'true')
@@ -929,6 +952,7 @@ export const uploadDocument = async (
 }
 
 export const getProfiles = async (): Promise<string[]> => {
+  if (ontologyGraphMode) return ontologyGraphRequest<string[]>('edp_profiles')
   const response = await axiosInstance.get('/documents/profiles')
   return response.data
 }
@@ -947,6 +971,7 @@ export const batchUploadDocuments = async (
 }
 
 export const clearDocuments = async (): Promise<DocActionResponse> => {
+  if (ontologyGraphMode) return ontologyGraphRequest<DocActionResponse>('documents',{}, {method:'DELETE'})
   const response = await axiosInstance.delete('/documents')
   return response.data
 }
@@ -955,6 +980,7 @@ export const clearCache = async (): Promise<{
   status: 'success' | 'fail'
   message: string
 }> => {
+  if (ontologyGraphMode) return ontologyPost<{status:'success'|'fail';message:string}>('documents/clear_cache')
   const response = await axiosInstance.post('/documents/clear_cache', {})
   return response.data
 }
@@ -964,6 +990,7 @@ export const deleteDocuments = async (
   deleteFile: boolean = false,
   deleteLLMCache: boolean = false
 ): Promise<DeleteDocResponse> => {
+  if (ontologyGraphMode) return ontologyPost<DeleteDocResponse>('documents/delete_batch',{ids:docIds})
   const response = await axiosInstance.delete('/documents/delete_document', {
     data: { doc_ids: docIds, delete_file: deleteFile, delete_llm_cache: deleteLLMCache }
   })
@@ -1029,6 +1056,7 @@ export const getAuthStatus = async (): Promise<AuthStatusResponse> => {
 }
 
 export const getPipelineStatus = async (): Promise<PipelineStatusResponse> => {
+  if (ontologyGraphMode) return ontologyGraphRequest<PipelineStatusResponse>('documents/pipeline_status')
   const response = await axiosInstance.get('/documents/pipeline_status')
   return response.data
 }
@@ -1037,6 +1065,7 @@ export const cancelPipeline = async (): Promise<{
   status: 'cancellation_requested' | 'not_busy'
   message: string
 }> => {
+  if (ontologyGraphMode) return ontologyPost<{status:'cancellation_requested'|'not_busy';message:string}>('documents/cancel_pipeline')
   const response = await axiosInstance.post('/documents/cancel_pipeline')
   return response.data
 }
@@ -1210,6 +1239,7 @@ const defaultPaginatedDocumentsPost = async (
   request: DocumentsRequest,
   controller: AbortController
 ): Promise<PaginatedDocsResponse> => {
+  if (ontologyGraphMode) return ontologyPost<PaginatedDocsResponse>('documents/paginated',request,controller.signal)
   const response = await axiosInstance.post('/documents/paginated', request, {
     signal: controller.signal
   })
@@ -1299,6 +1329,7 @@ export const getDocumentsPaginatedWithTimeout = (
  * @returns Promise with status counts response
  */
 export const getDocumentStatusCounts = async (): Promise<StatusCountsResponse> => {
+  if (ontologyGraphMode) return ontologyGraphRequest<StatusCountsResponse>('documents/status_counts')
   const response = await axiosInstance.get('/documents/status_counts')
   return response.data
 }

@@ -1,4 +1,6 @@
 import { useMemo } from 'react'
+import { ontologyGraphMode } from '@/lib/ontologyGraph'
+import OntologyEvidenceDialog from '@/components/documents/OntologyEvidenceDialog'
 import { useGraphStore, RawNodeType, RawEdgeType } from '@/stores/graph'
 import { useBackendState } from '@/stores/state'
 import Text from '@/components/ui/Text'
@@ -67,6 +69,7 @@ type NodeType = RawNodeType & {
   relationships: {
     type: string
     id: string
+    edgeId: string
     label: string
   }[]
 }
@@ -105,9 +108,10 @@ const refineNodeProperties = (node: RawNodeType): NodeType => {
           const neighbour = state.rawGraph.getNode(neighbourId)
           if (neighbour) {
             relationships.push({
-              type: 'Neighbour',
+              type: ontologyGraphMode ? (isTarget ? '→ ' : '← ') + (edge.properties['keywords'] || edge.type || '') : 'Neighbour',
               id: neighbourId,
-              label: neighbour.properties['entity_id'] ? neighbour.properties['entity_id'] : neighbour.labels.join(', ')
+              edgeId: edge.id,
+              label: ontologyGraphMode ? neighbour.labels.join(', ') : (neighbour.properties['entity_id'] || neighbour.labels.join(', '))
             })
           }
         }
@@ -215,7 +219,7 @@ const PropertyRow = ({
   }
 
   // Use EditablePropertyRow for editable fields (description, entity_id and entity_type)
-  if (isEditable && (name === 'description' || name === 'entity_id' || name === 'entity_type'  || name === 'keywords')) {
+  if (!ontologyGraphMode && isEditable && (name === 'description' || name === 'entity_id' || name === 'entity_type'  || name === 'keywords')) {
     return (
       <EditablePropertyRow
         name={name}
@@ -235,6 +239,7 @@ const PropertyRow = ({
     )
   }
 
+  if(ontologyGraphMode && (name==='sources'||name==='attributes') && Array.isArray(value)) return <div className="space-y-1"><b>{name}</b>{value.map((v:any,i:number)=><div key={i} className="border rounded p-1 break-all">{v.property_uri&&<div>{v.property_uri}: {JSON.stringify(v.value)}</div>}{v.chunk_id&&v.doc_id&&<OntologyEvidenceDialog docId={v.doc_id} filename={v.doc_id} initialChunk={v.chunk_id} initialQuote={v.evidence}/>}</div>)}</div>
   // For non-editable fields, use the regular Text component
   return (
     <div className="flex items-center gap-2">
@@ -342,10 +347,10 @@ const NodePropertiesView = ({ node, pipelineBusy }: { node: NodeType; pipelineBu
             {t('graphPanel.propertiesView.node.relationships')}
           </h3>
           <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
-            {node.relationships.map(({ type, id, label }) => {
+            {node.relationships.map(({ type, id, edgeId, label }) => {
               return (
                 <PropertyRow
-                  key={id}
+                  key={edgeId}
                   name={type}
                   value={label}
                   onClick={() => {

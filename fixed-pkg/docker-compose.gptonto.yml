@@ -1,0 +1,18 @@
+services:
+  gptonto:
+    build:
+      context: .
+      dockerfile: Dockerfile.gptonto
+    image: gptonto:dev
+    env_file: .env.gptonto
+    environment:
+      GPTONTO_HOST: 0.0.0.0
+      GPTONTO_PORT: 9621
+      GPTONTO_DB: /app/data/gptonto/gptonto.sqlite3
+      TIKTOKEN_CACHE_DIR: /app/data/tiktoken
+    ports:
+      - "9621:9621"
+    volumes:
+      - ./data/gptonto:/app/data/gptonto
+      - ./data/tiktoken:/app/data/tiktoken
+    restart: unless-stopped

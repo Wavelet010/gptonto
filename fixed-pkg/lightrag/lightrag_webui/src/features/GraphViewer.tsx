@@ -16,6 +16,7 @@ import { EdgeCurvedArrowProgram, createEdgeCurveProgram } from '@sigma/edge-curv
 import FocusOnNode from '@/components/graph/FocusOnNode'
 import LayoutsControl from '@/components/graph/LayoutsControl'
 import GraphControl from '@/components/graph/GraphControl'
+import { ontologyGraphMode } from '@/lib/ontologyGraph'
 // import ThemeToggle from '@/components/ThemeToggle'
 import ZoomControl from '@/components/graph/ZoomControl'
 import FullScreenControl from '@/components/graph/FullScreenControl'
@@ -284,8 +285,9 @@ const GraphViewer = () => {
           {/* <ThemeToggle /> */}
         </div>
 
-        {showPropertyPanel && (
-          <div className="absolute top-2 right-2 z-10">
+        {/* Keep the graph-fetch hook mounted even when the property panel is hidden. */}
+        {(showPropertyPanel || ontologyGraphMode) && (
+          <div className={showPropertyPanel ? "absolute top-2 right-2 z-10" : "hidden"} aria-hidden={!showPropertyPanel}>
             <PropertiesView />
           </div>
         )}

@@ -1,0 +1,11 @@
+description: 设备信息、型号、编号、电量和网关连接
+routing:
+  keywords: [设备, 摄像机, 网关, 型号, 电量]
+extraction:
+  instructions: |
+    设备编号保留大小写和连字符。
+    电量百分数用整数表示，例如88%记录为88。
+    只根据原文提取连接或上报关系，不自行补全。
+identity_properties:
+  https://example.org/device#Device: https://example.org/device#deviceId
+  https://example.org/device#Gateway: https://example.org/device#gatewayId
