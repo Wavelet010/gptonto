@@ -27,6 +27,7 @@ class Options(BaseModel):
     number_base: int | None = Field(None,ge=1,le=6)
     profile_ids: list[str] | None = None
     cross_chunk: bool = True
+    parser: Literal["auto","native","legacy","mineru","docling"] = "auto"
 
     @model_validator(mode="after")
     def check(self):
@@ -185,6 +186,13 @@ def create_app():
         try: store.set_enabled("resources",id,body.enabled)
         except KeyError: raise HTTPException(404,"Unknown resource")
         return {"enabled":body.enabled}
+
+    @api.get("/parsers")
+    async def parsers():
+        from lightrag.parser.registry import suffix_capabilities, engine_endpoint_configured, engine_endpoint_requirement
+        return [{"id":name,"suffixes":sorted(suffix_capabilities(name)),
+                 "available":engine_endpoint_configured(name),"requirement":engine_endpoint_requirement(name)}
+                for name in ("native","legacy","mineru","docling")]
 
     @api.post("/documents",status_code=202)
     async def upload_document(file:UploadFile=File(...), options:str=Form("{}")):

@@ -5,10 +5,12 @@ from pathlib import Path
 from .heading import heading_chunks
 
 
-def parse_document(filename, data, doc_id, directory):
+def parse_document(filename, data, doc_id, directory, engine="auto"):
     suffix = Path(filename).suffix.lower()
     os.environ.setdefault("NATIVE_MD_IMAGE_DOWNLOAD_ENABLED", "false")
-    if suffix in {".docx", ".md"}:
+    if engine == "native" or (engine == "auto" and suffix in {".docx", ".md"}):
+        if suffix not in {".docx", ".md"}:
+            raise ValueError("Native parser supports DOCX and Markdown")
         from lightrag.parser.docx.parser import NativeDocxParser
         from lightrag.parser.markdown.parser import NativeMarkdownParser
         from lightrag.sidecar import write_sidecar
@@ -26,10 +28,35 @@ def parse_document(filename, data, doc_id, directory):
                               engine=parser.engine_name, clean_parsed_dir=False,
                               block_drawing_path_style=parser.sidecar_path_style)
         return parsed["content"], parsed["blocks_path"]
-    if suffix not in {".txt",".pdf",".pptx",".xlsx",".csv",".json",".html",".htm",".xml"}:
+    from lightrag.parser.registry import suffix_capabilities
+    if suffix.lstrip(".") not in suffix_capabilities("legacy"):
         raise ValueError("Unsupported document type")
     from lightrag.parser.legacy.extractors import extract_text
     return extract_text(data,suffix,pdf_password=os.getenv("PDF_DECRYPT_PASSWORD")), None
+
+
+async def parse_external(filename,data,doc_id,directory,engine):
+    """Use upstream download/IR/sidecar hooks, without the RAG persistence layer."""
+    import asyncio
+    from lightrag.parser.registry import get_parser, suffix_capabilities, engine_endpoint_configured, engine_endpoint_requirement
+    from lightrag.sidecar import write_sidecar
+    suffix = Path(filename).suffix.lower()
+    if suffix.lstrip(".") not in suffix_capabilities(engine):
+        raise ValueError("Unsupported suffix for "+engine)
+    if not engine_endpoint_configured(engine):
+        raise ValueError("Parser requires "+str(engine_endpoint_requirement(engine)))
+    parser = get_parser(engine)
+    source = directory / ("document"+suffix)
+    source.write_bytes(data)
+    raw = directory / "raw"
+    raw.mkdir()
+    await parser.download_into(raw,source,upload_name=source.name)
+    def normalize():
+        ir = parser.build_ir(raw,source.name)
+        parser.validate_ir(ir,file_path=filename,raw_dir=raw)
+        parsed = write_sidecar(ir,parsed_dir=directory/"parsed",doc_id="doc-"+doc_id,engine=engine)
+        return parsed["content"],parsed["blocks_path"]
+    return await asyncio.to_thread(normalize)
 
 
 async def split_document(filename, data, doc_id, options):
@@ -40,7 +67,12 @@ async def split_document(filename, data, doc_id, options):
     strategy,size,overlap = options["strategy"], options["size"], options["overlap"]
     tokenizer = TiktokenTokenizer()
     with tempfile.TemporaryDirectory(prefix="gptonto-") as tmp:
-        text, blocks = await asyncio.to_thread(parse_document,filename,data,doc_id,Path(tmp))
+        engine = options.get("parser","auto")
+        if engine in {"mineru","docling"}:
+            text, blocks = await parse_external(filename,data,doc_id,Path(tmp),engine)
+        else:
+            text, blocks = await asyncio.to_thread(parse_document,filename,data,doc_id,Path(tmp),engine)
+        resolved_engine = ("native" if Path(filename).suffix.lower() in {".docx",".md"} else "legacy") if engine=="auto" else engine
         if not text.strip():
             raise ValueError("No usable text; scanned PDFs require OCR before upload")
         if strategy == "H":
@@ -67,4 +99,4 @@ async def split_document(filename, data, doc_id, options):
             chunks = chunking_by_fixed_token(tokenizer,text,size,chunk_overlap_token_size=overlap)
         if strategy != "H":
             chunks = enforce_chunk_token_limit_before_embedding(chunks, tokenizer, size)
-        return [{**chunk,"chunk_order_index":i,"chunking_strategy":strategy} for i,chunk in enumerate(chunks) if chunk.get("content","").strip()]
+        return [{**chunk,"chunk_order_index":i,"chunking_strategy":strategy,"parse_engine":resolved_engine} for i,chunk in enumerate(chunks) if chunk.get("content","").strip()]
