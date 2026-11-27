@@ -495,3 +495,23 @@ def test_shared_model_concurrency(tmp_path,monkeypatch):
         finally: await close()
     asyncio.run(run())
     assert peak==1
+
+
+
+def test_original_sidecar_block_positions(tmp_path):
+    import json
+    from lightrag.ontology.evidence import attach_source_blocks,evidence_view
+    from lightrag.sidecar import backfill_chunk_sidecars
+    block="设备D-001"
+    path=tmp_path/"doc.blocks.jsonl"
+    path.write_text("\n".join(json.dumps(x,ensure_ascii=False) for x in [
+        {"type":"meta"},{"type":"content","blockid":"b1","content":block,
+         "positions":[{"page":2,"bbox":[1,2,3,4]}]}]),encoding="utf-8")
+    chunks=[{"content":block,"_source_span":{"start":0,"end":len(block)}}]
+    backfill_chunk_sidecars(chunks,str(path))
+    assert chunks[0]["sidecar"]["refs"]==[{"type":"block","id":"b1"}]
+    attach_source_blocks(chunks,str(path),tmp_path)
+    row={"id":"c","doc_id":"d","filename":"doc.pdf","ord":0,"data":chunks[0]}
+    view=evidence_view(row,"D-001")
+    assert view["source_blocks"][0]["positions"]==[{"page":2,"bbox":[1,2,3,4]}]
+    assert view["source_blocks"][0]["artifact"]=="doc.blocks.jsonl"

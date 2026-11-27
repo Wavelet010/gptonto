@@ -98,8 +98,22 @@ async def split_document(filename, data, doc_id, options, *, artifact_sink=None,
         if strategy != "H":
             chunks = enforce_chunk_token_limit_before_embedding(chunks, tokenizer, size)
         # Keep extracted text and raw parser sidecars together with exact chunk evidence.
-        from .evidence import locate_chunks, pack_artifacts
+        from .evidence import locate_chunks, pack_artifacts, attach_source_blocks
+        if blocks and strategy in {"F","R","V"}:
+            # Same original strict block matching used by LightRAG pipeline.
+            # Run before exact-span normalization (upstream also supports normalized spans).
+            from lightrag.sidecar import backfill_chunk_sidecars
+            backfill_chunk_sidecars(chunks,blocks)
         chunks=locate_chunks(text,chunks)
+        if blocks and strategy in {"H","S"}:
+            # H/S do not share the original F/R/V source-span contract. Only
+            # backfill exact locatable chunks; never guess a position.
+            from lightrag.sidecar import backfill_chunk_sidecars
+            from lightrag.exceptions import ChunkBlockMatchError
+            for chunk in chunks:
+                if chunk.get("_source_span"):
+                    try: backfill_chunk_sidecars([chunk],blocks)
+                    except ChunkBlockMatchError: chunk["provenance_warning"]="Source block could not be located"
         if strategy=="S":
             await enrich_edp(chunks,text,filename,options,metadata_llm)
         if options.get("modalities"):
@@ -108,6 +122,8 @@ async def split_document(filename, data, doc_id, options, *, artifact_sink=None,
                 raise ValueError("Multimodal analysis requires a sidecar parser and configured model")
             extra=await multimodal(doc_id,filename,text,blocks,options["modalities"],tokenizer,len(chunks))
             chunks.extend({**c,"evidence_kind":"multimodal_analysis"} for c in extra)
+        if blocks:
+            await asyncio.to_thread(attach_source_blocks,chunks,blocks,Path(tmp))
         if artifact_sink:
             bundle=await asyncio.to_thread(pack_artifacts,Path(tmp),text)
             artifact_sink(bundle)

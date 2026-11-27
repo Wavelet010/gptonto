@@ -162,9 +162,9 @@ def create_app():
     async def lifespan(app):
         store.recover()
         yield
-        active = list(tasks)
-        for task in active: task.cancel()
-        await asyncio.gather(*active,return_exceptions=True)
+        running = list(tasks)
+        for task in running: task.cancel()
+        await asyncio.gather(*running,return_exceptions=True)
         await close_llm()
         await close_multimodal()
 

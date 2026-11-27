@@ -396,7 +396,7 @@ class Store:
                     q=db.execute("SELECT c.id,c.ord,c.data,c.doc_id,d.filename FROM chunks c JOIN documents d ON d.id=c.doc_id WHERE c.id=?",(cid,)).fetchone()
                     evidence_rows[cid]={**dict(q),"data":json.loads(q["data"])}
                 view=evidence_view(evidence_rows[cid],row["evidence"])
-                return {k:view[k] for k in ("filename","chunk_order_index","matches","heading","evidence_kind","sidecar","parse_engine")}
+                return {k:view[k] for k in ("filename","chunk_order_index","matches","heading","evidence_kind","sidecar","parse_engine","source_blocks","source_assets","provenance_warning")}
             entities = {}
             for r in db.execute("""SELECT e.id,e.class_uri,s.name,s.evidence,s.chunk_id,s.profile_id,c.doc_id
                 FROM entity_sources s JOIN entities e ON e.id=s.entity_id JOIN chunks c ON c.id=s.chunk_id"""+filt,args):

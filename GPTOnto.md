@@ -80,3 +80,11 @@ npm run build -- --mode gptonto
 每个实体、属性和关系仍要求证据字符串为文本块中的原样子串；JSON 增加 provenance 字段，记录文件、文本块、章节、证据匹配位置和证据类型。只有文本块与解析原文完全对应时才标注解析原文绝对字符位置；重复或规范化文本无法可靠定位时保留块内位置及原文。图片/表格/公式分析的模型生成文本明确标为 multimodal_analysis，不伪装为原文。原始文件下载、解析资产列表及下载、证据查看均需服务密钥（若已配置）。新导入文档保留解析文本和原 Sidecar、图片等资产（SQLite 压缩归档，默认未压缩 128 MiB 限制 GPTONTO_ARTIFACT_MAX_BYTES）。旧导入数据仍保留块内证据，未保存的历史资产需重新导入才能恢复。
 
 可选 OpenAI 兼容视觉模型：VLM_MODEL、VLM_BINDING_HOST、VLM_BINDING_API_KEY。图片分析使用原 analyze_multimodal / _build_mm_chunks_from_sidecars，不初始化 RAG。表格和公式可调用文本模型。尚需真实 VLM 服务联调。原 VLM 分析使用独立并发队列。
+
+## 第六轮：原 LightRAG 复用与知识一致性
+
+原解析路由、CHUNK_* 默认配置、文件名解析指令、EDP YAML ProfileManager、MetadataBuilder、ContextBuilder 已接入；请求显式 size/overlap 优先，未传时使用原配置。解析器、分块参数和 EDP 配置在上传及预览时解析为快照。H 仍为严格标题分块。EDP 模型元数据通过直接 LLM 调用，不初始化 RAG。抽取、EDP 元数据和多模态共享原 LightRAG priority_limit_async_func_call 队列及 GPTONTO_LLM_CONCURRENCY 上限；语义向量分块的 embedding 独立。
+
+原 Sidecar backfill_chunk_sidecars 用于 F/R/V，H/S 只对可靠定位的块尝试映射，P 保留原 Sidecar。证据输出增加原始块位置和原始资产引用，位置是解析器提供的覆盖块位置，并非精确到字的 PDF 坐标。React 证据详情及实例查询使用原分页控件，支持 JSON/TTL 导出、整篇重新抽取和失败诊断。旧 HTML 保留为离线备用入口，不在正常 React 导航中推荐。
+
+文档内函数型属性/关系在稳定身份归并后再次校验，冲突断言及证据保留诊断而不作为有效事实；失败的重试保留原有效事实。不同文档的时态/争议属性尚未实施全库冲突治理。解析完成后保存分块检查点，取消或异常后可以复用。
