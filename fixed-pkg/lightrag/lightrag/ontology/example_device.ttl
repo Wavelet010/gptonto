@@ -1,0 +1,12 @@
+@prefix ex: <https://example.org/device#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+ex:Device a owl:Class ; rdfs:label "设备"@zh .
+ex:Gateway a owl:Class ; rdfs:label "网关"@zh .
+ex:deviceId a owl:DatatypeProperty ; rdfs:domain ex:Device ; rdfs:range xsd:string .
+ex:model a owl:DatatypeProperty ; rdfs:domain ex:Device ; rdfs:range xsd:string .
+ex:gatewayId a owl:DatatypeProperty ; rdfs:domain ex:Gateway ; rdfs:range xsd:string .
+ex:batteryLevel a owl:DatatypeProperty ; rdfs:domain ex:Device ; rdfs:range xsd:integer .
+ex:connectedTo a owl:ObjectProperty ; rdfs:domain ex:Device ; rdfs:range ex:Gateway .
+ex:reportsTo a owl:ObjectProperty ; rdfs:domain ex:Device ; rdfs:range ex:Gateway .
