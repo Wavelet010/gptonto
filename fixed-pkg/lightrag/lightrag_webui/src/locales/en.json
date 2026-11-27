@@ -523,6 +523,7 @@
     "lastPage": "Last Page"
   },
   "gptonto": {
+    "originalDefaults": "Use original LightRAG chunk size and overlap defaults",
     "instances": "Instances",
     "export": "Export",
     "retryAll": "Re-extract",

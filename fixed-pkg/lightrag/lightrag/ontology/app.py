@@ -151,7 +151,7 @@ def create_app():
         def finished(t):
             tasks.discard(t)
             if t.cancelled():
-                store.status(did,"FAILED","Interrupted; retry document")
+                store.status(did,"CANCELLED" if did in cancelled else "FAILED","Cancelled by user" if did in cancelled else "Interrupted; retry document")
             if active.get(did) is not t: return
             active.pop(did,None)
             cancelled.discard(did)
@@ -321,6 +321,9 @@ def create_app():
     @api.post("/documents/cancel_pipeline")
     async def cancel_pipeline():
         cancelled.update(active)
+        # Queued tasks have no parser or model resources to drain.
+        for did,task in list(active.items()):
+            if phases.get(did,{}).get("phase")=="QUEUED": task.cancel()
         return {"status":"cancellation_requested" if active else "not_busy",
                 "message":"Cancellation takes effect at the next safe processing boundary"}
 

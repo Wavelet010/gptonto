@@ -523,6 +523,7 @@
     "lastPage": "末页"
   },
   "gptonto": {
+    "originalDefaults": "使用原 LightRAG 分块大小与重叠默认配置",
     "instances": "实例管理",
     "export": "导出",
     "retryAll": "整篇重新抽取",

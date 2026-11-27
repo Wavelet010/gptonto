@@ -515,3 +515,28 @@ def test_original_sidecar_block_positions(tmp_path):
     view=evidence_view(row,"D-001")
     assert view["source_blocks"][0]["positions"]==[{"page":2,"bbox":[1,2,3,4]}]
     assert view["source_blocks"][0]["artifact"]=="doc.blocks.jsonl"
+
+
+
+@pytest.mark.parametrize("strategy",["F","R","P","S","H"])
+def test_native_docx_chunker_preserves_original_evidence(strategy):
+    import io
+    from docx import Document
+    from lightrag.ontology.documents import split_document
+    from lightrag.ontology.evidence import artifact_manifest
+    doc=Document()
+    doc.add_heading("一、设备",level=1)
+    doc.add_paragraph("设备D-001。")
+    doc.add_heading("二、状态",level=1)
+    doc.add_paragraph("电量88%。")
+    content=io.BytesIO()
+    doc.save(content)
+    artifacts=[]
+    chunks=asyncio.run(split_document("test.docx",content.getvalue(),"a"*32,
+        {"parser":"native","strategy":strategy,"size":128,"overlap":0,"heading_depth":1},
+        artifact_sink=artifacts.append))
+    assert chunks and all(c["tokens"]<=128 for c in chunks)
+    assert "设备D-001" in "".join(c["content"] for c in chunks)
+    if strategy in {"F","R","P","H"}:
+        assert any(c.get("source_blocks") for c in chunks)
+    assert any(a["path"].endswith(".blocks.jsonl") for a in artifact_manifest(artifacts[0]))
