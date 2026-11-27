@@ -36,37 +36,50 @@ class SQLiteLLMCache:
         await asyncio.to_thread(write)
 
 
-def create_llm_runtime(store):
-    from lightrag.utils import priority_limit_async_func_call, use_llm_func_with_cache, remove_think_tags
+def create_model_provider():
+    """One original LightRAG priority queue for extraction, metadata and VLM."""
+    from lightrag.utils import priority_limit_async_func_call,remove_think_tags
     from .engine import parse_json
-    timeout = max(1,int(os.getenv("GPTONTO_LLM_TIMEOUT","120")))
-    concurrency = max(1,int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")))
-    queue_size = max(1,int(os.getenv("GPTONTO_LLM_QUEUE_SIZE","1000")))
-    cache = SQLiteLLMCache(store)
-    fresh_cache = SQLiteLLMCache(store,bypass_reads=True)
-    enabled = os.getenv("GPTONTO_LLM_CACHE","true").lower() in {"1","true","yes"}
-    model = os.getenv("LLM_MODEL")
-    host = os.getenv("LLM_BINDING_HOST")
-    api_key = os.getenv("LLM_BINDING_API_KEY")
+    timeout=max(1,int(os.getenv("GPTONTO_LLM_TIMEOUT","120")))
+    concurrency=max(1,int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")))
+    queue_size=max(1,int(os.getenv("GPTONTO_LLM_QUEUE_SIZE","1000")))
+    model=os.getenv("LLM_MODEL")
+    host=os.getenv("LLM_BINDING_HOST")
+    api_key=os.getenv("LLM_BINDING_API_KEY")
+    vision_model=os.getenv("VLM_MODEL") or os.getenv("VLM_BINDING_MODEL")
 
     @priority_limit_async_func_call(concurrency,llm_timeout=timeout,max_queue_size=queue_size,
-                                   queue_name="gptonto-extract",concurrency_group=None)
-    async def provider(prompt,system_prompt=None,**kwargs):
+                                   queue_name="gptonto-model",concurrency_group=None)
+    async def provider(prompt,system_prompt=None,require_object=False,**kwargs):
         from lightrag.llm.openai import openai_complete_if_cache
-        if not model:
-            raise ValueError("LLM_MODEL not configured")
-        raw = await openai_complete_if_cache(model,prompt,system_prompt=system_prompt,
-                base_url=host,api_key=api_key,stream=False,timeout=timeout,**kwargs)
-        raw = remove_think_tags(raw)
-        # Never cache malformed JSON. Semantic validation is still done by the
-        # extraction stage and explicit retries always bypass the cache.
-        parsed = parse_json(raw)
-        if not isinstance(parsed,dict):
+        vision=bool(kwargs.get("image_inputs"))
+        selected=vision_model if vision else model
+        if not selected: raise ValueError("Required model not configured")
+        kwargs.pop("stream",None)
+        raw=await openai_complete_if_cache(selected,prompt,system_prompt=system_prompt,
+            base_url=(os.getenv("VLM_BINDING_HOST") or host) if vision else host,
+            api_key=(os.getenv("VLM_BINDING_API_KEY") or api_key) if vision else api_key,
+            stream=False,timeout=timeout,**kwargs)
+        raw=remove_think_tags(raw)
+        if require_object and not isinstance(parse_json(raw),dict):
             raise ValueError("Expected a JSON object")
         return raw
+    return provider
+
+
+def create_llm_runtime(store,provider=None):
+    from lightrag.utils import use_llm_func_with_cache
+    provider=provider or create_model_provider()
+    cache=SQLiteLLMCache(store)
+    fresh_cache=SQLiteLLMCache(store,bypass_reads=True)
+    enabled=os.getenv("GPTONTO_LLM_CACHE","true").lower() in {"1","true","yes"}
+    model=os.getenv("LLM_MODEL")
+    host=os.getenv("LLM_BINDING_HOST")
+    async def extract_provider(prompt,system_prompt=None,**kwargs):
+        return await provider(prompt,system_prompt=system_prompt,require_object=True,**kwargs)
 
     async def invoke(prompt,system,*,fresh=False):
-        output,_ = await use_llm_func_with_cache(prompt,provider,
+        output,_=await use_llm_func_with_cache(prompt,extract_provider,
             llm_response_cache=(fresh_cache if fresh else cache) if enabled else None,
             system_prompt=system,cache_type="gptonto_extract_v1",
             llm_cache_identity={"binding":"openai","model":model,"host":host})

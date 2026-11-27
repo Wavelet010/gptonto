@@ -31,6 +31,7 @@ class Options(BaseModel):
     parser_params: dict = Field(default_factory=dict)
     chunk_params: dict = Field(default_factory=dict)
     modalities: list[Literal["images","tables","equations"]] = Field(default_factory=list)
+    edp_profile: str | None = None
 
     @model_validator(mode="after")
     def check(self):
@@ -64,10 +65,14 @@ def create_app():
             del history[:-200]
     from .preview import PreviewCache
     previews = PreviewCache()
-    from .llm_runtime import create_llm_runtime
-    llm, fresh_llm, close_llm, llm_stats = create_llm_runtime(store)
+    from .llm_runtime import create_llm_runtime, create_model_provider
+    provider = create_model_provider()
+    llm, fresh_llm, close_llm, llm_stats = create_llm_runtime(store,provider)
     from .multimodal import create_multimodal_runtime
-    analyze_modalities, close_multimodal = create_multimodal_runtime(store)
+    analyze_modalities, close_multimodal = create_multimodal_runtime(store,provider)
+    from .config import resolve_options, profile_manager
+    async def metadata_llm(prompt,system):
+        return await provider(prompt,system_prompt=system)
     document_semaphore = asyncio.Semaphore(max(1,int(os.getenv("GPTONTO_DOCUMENT_CONCURRENCY","2"))))
     key = os.getenv("GPTONTO_API_KEY")
     async def auth(authorization: str | None = Header(None)):
@@ -108,7 +113,7 @@ def create_app():
                 if chunks is None:
                     chunks = await split_document(doc["filename"],doc["source"],did,doc["options"],
                         artifact_sink=lambda bundle:store.save_artifacts(did,bundle),multimodal=analyze_modalities,
-                        stage=lambda name:progress(did,name))
+                        stage=lambda name:progress(did,name),metadata_llm=metadata_llm)
                 if not chunks: raise ValueError("No usable chunks")
                 progress(did,"EXTRACTING",0,len(chunks))
                 records = await extract_chunks(chunks,doc["snapshot"],llm,
@@ -225,6 +230,9 @@ def create_app():
     async def runtime():
         return {"llm_queue":await llm_stats(),"active_documents":len(tasks)}
 
+    @api.get("/edp_profiles")
+    async def edp_profiles(): return profile_manager().list_profiles()
+
     @api.get("/parsers")
     async def parsers():
         from lightrag.parser.registry import suffix_capabilities, engine_endpoint_configured, engine_endpoint_requirement
@@ -246,7 +254,8 @@ def create_app():
         if not os.getenv("LLM_MODEL"): raise HTTPException(503,"LLM_MODEL not configured")
         data = await read(file,32*1024*1024)
         filename=Path(file.filename or "document.txt").name
-        options_dict=opts.model_dump()
+        try: options_dict=resolve_options(filename,opts.model_dump(),opts.model_fields_set)
+        except (ValueError,TypeError,KeyError) as exc: raise HTTPException(422,str(exc)) from exc
         prepared=previews.take(preview_id,filename,data,options_dict) if preview_id else None
         did = store.new_document(filename,data,options_dict,profiles,
                                  did=prepared[0] if prepared else None,
@@ -264,8 +273,10 @@ def create_app():
             filename=Path(file.filename or "document.txt").name
             did=uuid.uuid4().hex
             artifacts=[]
-            chunks = await split_document(filename,data,did,opts.model_dump(),artifact_sink=artifacts.append,multimodal=analyze_modalities)
-            token=previews.put(did,filename,data,opts.model_dump(),chunks,artifacts[0] if artifacts else None)
+            options_dict=resolve_options(filename,opts.model_dump(),opts.model_fields_set)
+            async with document_semaphore:
+                chunks = await split_document(filename,data,did,options_dict,artifact_sink=artifacts.append,multimodal=analyze_modalities,metadata_llm=metadata_llm)
+            token=previews.put(did,filename,data,options_dict,chunks,artifacts[0] if artifacts else None)
             return {"count":len(chunks),"chunks":chunks,"preview_id":token}
         except HTTPException: raise
         except Exception as exc: raise HTTPException(422,type(exc).__name__+": "+str(exc)[:300]) from exc
