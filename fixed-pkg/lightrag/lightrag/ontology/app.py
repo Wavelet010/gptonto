@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 import yaml
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Header
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Header, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, model_validator
 from .storage import Store
@@ -243,6 +243,16 @@ def create_app():
         try: store.delete_document(id)
         except ValueError as exc: raise HTTPException(409,str(exc)) from exc
         return {"deleted":id}
+
+    @api.get("/instances")
+    async def instances(document_id:str | None=None,q:str=Query("",max_length=300),
+                        class_uri:str | None=None,offset:int=Query(0,ge=0),
+                        limit:int=Query(50,ge=1,le=100),focus:str | None=None):
+        from .browse import browse_instances
+        if document_id:
+            try: store.document(document_id)
+            except KeyError: raise HTTPException(404,"Unknown document")
+        return await asyncio.to_thread(browse_instances,store,document_id,q,class_uri,offset,limit,focus)
 
     @api.get("/export")
     async def export(document_id:str | None=None, format:Literal["json","ttl"]="json"):

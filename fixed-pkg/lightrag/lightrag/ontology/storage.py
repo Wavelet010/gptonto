@@ -79,6 +79,8 @@ class Store:
                 PRIMARY KEY(relationship_id,chunk_id,profile_id,evidence)
             );
             CREATE INDEX IF NOT EXISTS ix_chunks_doc ON chunks(doc_id);
+            CREATE INDEX IF NOT EXISTS ix_entities_class ON entities(class_uri);
+            CREATE INDEX IF NOT EXISTS ix_entity_sources_name ON entity_sources(name);
             CREATE INDEX IF NOT EXISTS ix_entity_sources_chunk ON entity_sources(chunk_id);
             CREATE INDEX IF NOT EXISTS ix_attrs_entity ON attributes(entity_id);
             CREATE INDEX IF NOT EXISTS ix_attrs_chunk ON attributes(chunk_id);
