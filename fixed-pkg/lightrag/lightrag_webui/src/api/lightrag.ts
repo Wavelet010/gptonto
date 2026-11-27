@@ -554,7 +554,7 @@ export const queryGraphs = async (
   maxDepth: number,
   maxNodes: number
 ): Promise<LightragGraphType> => {
-  if (ontologyGraphMode) return ontologyGraphRequest<LightragGraphType>('graph', {label,max_depth:maxDepth,max_nodes:Math.min(maxNodes,1000)})
+  if (ontologyGraphMode) return ontologyGraphRequest<LightragGraphType>('graph', {label,max_depth:Math.max(1,Math.min(maxDepth,8)),max_nodes:Math.max(1,Math.min(maxNodes,1000))})
   const response = await axiosInstance.get(`/graphs?label=${encodeURIComponent(label)}&max_depth=${maxDepth}&max_nodes=${maxNodes}`)
   return response.data
 }

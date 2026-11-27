@@ -284,11 +284,10 @@ const GraphViewer = () => {
           {/* <ThemeToggle /> */}
         </div>
 
-        {showPropertyPanel && (
-          <div className="absolute top-2 right-2 z-10">
-            <PropertiesView />
-          </div>
-        )}
+        {/* Keep the graph-fetch hook mounted even when the property panel is hidden. */}
+        <div className={showPropertyPanel ? "absolute top-2 right-2 z-10" : "hidden"} aria-hidden={!showPropertyPanel}>
+          <PropertiesView />
+        </div>
 
         {showLegend && (
           <div className="absolute right-2 bottom-10 z-0">

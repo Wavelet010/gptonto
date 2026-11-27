@@ -68,6 +68,7 @@ type NodeType = RawNodeType & {
   relationships: {
     type: string
     id: string
+    edgeId: string
     label: string
   }[]
 }
@@ -106,9 +107,10 @@ const refineNodeProperties = (node: RawNodeType): NodeType => {
           const neighbour = state.rawGraph.getNode(neighbourId)
           if (neighbour) {
             relationships.push({
-              type: 'Neighbour',
+              type: ontologyGraphMode ? (isTarget ? '→ ' : '← ') + (edge.properties['keywords'] || edge.type || '') : 'Neighbour',
               id: neighbourId,
-              label: neighbour.properties['entity_id'] ? neighbour.properties['entity_id'] : neighbour.labels.join(', ')
+              edgeId: edge.id,
+              label: ontologyGraphMode ? neighbour.labels.join(', ') : (neighbour.properties['entity_id'] || neighbour.labels.join(', '))
             })
           }
         }
@@ -343,10 +345,10 @@ const NodePropertiesView = ({ node, pipelineBusy }: { node: NodeType; pipelineBu
             {t('graphPanel.propertiesView.node.relationships')}
           </h3>
           <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
-            {node.relationships.map(({ type, id, label }) => {
+            {node.relationships.map(({ type, id, edgeId, label }) => {
               return (
                 <PropertyRow
-                  key={id}
+                  key={edgeId}
                   name={type}
                   value={label}
                   onClick={() => {
