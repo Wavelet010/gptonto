@@ -8,7 +8,9 @@ from .schema import validate
 def parse_json(raw):
     raw = raw.strip()
     raw = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", raw)
-    return json.loads(raw)
+    def reject_constant(value):
+        raise ValueError("Non-finite JSON number")
+    return json.loads(raw, parse_constant=reject_constant)
 
 
 async def extract_chunks(chunks, profiles, llm, concurrency=4):

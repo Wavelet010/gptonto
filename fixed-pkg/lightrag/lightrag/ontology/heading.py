@@ -17,13 +17,14 @@ def heading_chunks(tokenizer, content, size, *, depth=1, formats=None, number_ba
         raise ValueError("Invalid heading depth or token size")
     allowed = set(formats) if formats is not None else {p[0] for p in PATTERNS}
     # Numbered-only documents use level 1; mixed Chinese headings default to level 2.
-    base = number_base if number_base is not None else (2 if re.search(r"(?m)^\s*["+CN+r"]+、", content) else 1)
+    base = number_base if number_base is not None else (2 if re.search(r"(?m)^\s*(?:#{1,6}\s*)?["+CN+r"]+[、.．。]", content) else 1)
     def match(line):
         line = line.strip()
         if len(line) > 80 or re.search(r"[。！？；;]$", line) or re.match(r"^(?:\d{4}[-/年]|\d+\.\d+\.\d+\.\d+|图\s*\d|表\s*\d)", line):
             return None
+        numbered = re.sub(r"^#{1,6}\s*", "", line)
         for tag, pattern, level in PATTERNS:
-            m = pattern.match(line)
+            m = pattern.match(line if tag == "markdown" else numbered)
             if not m or tag not in allowed:
                 continue
             if tag == "number":
@@ -51,8 +52,10 @@ def heading_chunks(tokenizer, content, size, *, depth=1, formats=None, number_ba
         if not body.strip():
             continue
         # Use the existing token splitter only inside the section; no cross-section overlap.
-        parts = chunking_by_fixed_token(tokenizer, body, size, chunk_overlap_token_size=0)
+        parts = chunking_by_fixed_token(tokenizer, body, size, chunk_overlap_token_size=0, _emit_source_span=True)
         for j, part in enumerate(parts):
+            if isinstance(part.get("_source_span"), (list, tuple)) and len(part["_source_span"]) == 2:
+                part["_source_span"] = [start + x for x in part["_source_span"]]
             result.append({**part, "chunk_order_index": len(result), "heading_path": path,
                 "section_id": sid, "parent_section_id": parent, "section_part": j,
                 "section_start": start, "section_end": end, "chunking_strategy": "H"})

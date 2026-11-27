@@ -103,6 +103,13 @@ class Store:
             for rid, kind in ((ontology_id,"ontology"),(prompt_id,"prompt")):
                 if not db.execute("SELECT 1 FROM resources WHERE id=? AND kind=?",(rid,kind)).fetchone():
                     raise ValueError("Unknown " + kind)
+            from .schema import applies
+            schema = json.loads(db.execute("SELECT data FROM resources WHERE id=?", (ontology_id,)).fetchone()[0])
+            prompt = json.loads(db.execute("SELECT data FROM resources WHERE id=?", (prompt_id,)).fetchone()[0])
+            for cls, uri in prompt.get("identity_properties", {}).items():
+                prop = schema["properties"].get(uri)
+                if not prop or cls not in schema["classes"] or not applies(schema, cls, prop["domain"]):
+                    raise ValueError("Identity property is not allowed on class: " + cls)
             db.execute("INSERT OR IGNORE INTO profiles(id,name,ontology_id,prompt_id) VALUES(?,?,?,?)",
                        (pid,name,ontology_id,prompt_id))
         return pid

@@ -169,6 +169,17 @@ def create_app():
         enqueue(did)
         return {"id":did,"status":"QUEUED"}
 
+    @api.post("/documents/preview")
+    async def preview(file:UploadFile=File(...), options:str=Form("{}")):
+        import uuid
+        try:
+            opts = Options.model_validate_json(options)
+            data = await read(file,32*1024*1024)
+            chunks = await split_document(Path(file.filename or "document.txt").name,data,uuid.uuid4().hex,opts.model_dump())
+            return {"count":len(chunks),"chunks":chunks}
+        except HTTPException: raise
+        except Exception as exc: raise HTTPException(422,type(exc).__name__+": "+str(exc)[:300]) from exc
+
     @api.get("/documents")
     async def documents(): return store.documents()
 

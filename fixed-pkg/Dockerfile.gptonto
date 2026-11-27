@@ -1,0 +1,8 @@
+FROM lightrag-base:latest
+USER root
+ARG OFFLINE=0
+COPY gptonto-wheels/ /tmp/gptonto-wheels/
+RUN if [ "$OFFLINE" = "1" ]; then pip install --no-index --find-links=/tmp/gptonto-wheels 'rdflib>=7,<8'; else pip install 'rdflib>=7,<8'; fi && rm -rf /tmp/gptonto-wheels
+ENV PYTHONPATH=/app/gptonto-src
+COPY lightrag/lightrag /app/gptonto-src/lightrag
+CMD ["python","-m","lightrag.ontology.app"]

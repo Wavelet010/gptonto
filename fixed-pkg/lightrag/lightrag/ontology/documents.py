@@ -7,6 +7,7 @@ from .heading import heading_chunks
 
 def parse_document(filename, data, doc_id, directory):
     suffix = Path(filename).suffix.lower()
+    os.environ.setdefault("NATIVE_MD_IMAGE_DOWNLOAD_ENABLED", "false")
     if suffix in {".docx", ".md"}:
         from lightrag.parser.docx.parser import NativeDocxParser
         from lightrag.parser.markdown.parser import NativeMarkdownParser
@@ -33,7 +34,7 @@ def parse_document(filename, data, doc_id, directory):
 
 async def split_document(filename, data, doc_id, options):
     import asyncio
-    from lightrag.utils import TiktokenTokenizer, EmbeddingFunc
+    from lightrag.utils import TiktokenTokenizer, EmbeddingFunc, enforce_chunk_token_limit_before_embedding
     from lightrag.chunker import (chunking_by_fixed_token, chunking_by_recursive_character,
         chunking_by_paragraph_semantic, chunking_by_structure, chunking_by_semantic_vector)
     strategy,size,overlap = options["strategy"], options["size"], options["overlap"]
@@ -64,4 +65,5 @@ async def split_document(filename, data, doc_id, options):
             chunks = await chunking_by_semantic_vector(tokenizer,text,size,embedding_func=embed)
         else:
             chunks = chunking_by_fixed_token(tokenizer,text,size,chunk_overlap_token_size=overlap)
+        chunks = enforce_chunk_token_limit_before_embedding(chunks, tokenizer, size)
         return [{**chunk,"chunk_order_index":i,"chunking_strategy":strategy} for i,chunk in enumerate(chunks) if chunk.get("content","").strip()]
