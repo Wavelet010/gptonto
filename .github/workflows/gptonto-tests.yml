@@ -16,10 +16,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install -e '.[api]' pytest
+      - run: python -m pip install -e '.[api]' pytest pytest-asyncio
       - run: python -m compileall -q lightrag/ontology
       - run: python -m pytest tests/test_gptonto.py -q
-      - run: GPTONTO_DB=/tmp/gptonto-ci.sqlite3 python -c 'from lightrag.ontology.app import create_app; app=create_app(); paths={r.path for r in app.routes}; assert "/ontology-api/documents" in paths and "/ontology-api/export" in paths and "/query" not in paths'
+      - run: GPTONTO_DB=/tmp/gptonto-ci.sqlite3 python -c 'from lightrag.ontology.app import create_app; app=create_app(); paths=app.openapi()["paths"]; assert "/ontology-api/documents" in paths and "/ontology-api/export" in paths and "/query" not in paths'
       - run: |
           python -c 'from pathlib import Path; s=Path("lightrag/ontology/web.html").read_text(); Path("/tmp/gptonto-ui.js").write_text(s.split("<script>",1)[1].split("</script>",1)[0])'
           node --check /tmp/gptonto-ui.js
