@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tar -tzf /home/chenhs/rag/lightrag-edp/lightrag-edp-deploy.tar.gz)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(grep \"^lightrag-edp-deploy/[^/]*$\")",
+      "Bash(grep \"images/.*\\\\.tar$\")",
+      "Bash(tar -xzf /home/chenhs/rag/lightrag-edp/lightrag-edp-deploy.tar.gz lightrag-edp-deploy/lightrag/docker-entrypoint.sh --to-stdout)",
+      "Bash(tar -xzf /home/chenhs/rag/lightrag-edp/lightrag-edp-deploy.tar.gz lightrag-edp-deploy/update.sh --to-stdout)",
+      "Bash(/mnt/c/Program Files/Docker/Docker/resources/bin/docker compose:*)",
+      "Bash(\"/mnt/c/Program Files/Docker/Docker/resources/bin/docker\" compose -f /home/chenhs/rag/lightrag-edp/fixed-pkg/docker-compose.deploy.yml logs --tail=5 lightrag)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); chunks=d.get\\('data',{}\\).get\\('chunks',[]\\); print\\('chunks:',len\\(chunks\\)\\); [print\\('fields:', list\\(c.keys\\(\\)\\)\\) for c in chunks[:2]]\")",
+      "Bash(/mnt/c/Program Files/Docker/Docker/resources/bin/docker exec:*)",
+      "Bash(grep -rn \"graph/entity\\\\|graph/relation\\\\|/graph/label\\\\|graphApi\\\\|graph/\" fixed-pkg/lightrag/lightrag_webui/src --include=*.ts --include=*.tsx)",
+      "Bash(\"/mnt/c/Program Files/Docker/Docker/resources/bin/docker\" images --format \"{{.Repository}}:{{.Tag}}\\\\t{{.Size}}\")",
+      "Bash(\"/mnt/c/Program Files/Docker/Docker/resources/bin/docker\" pull python:3.12-slim-bookworm)",
+      "Bash(\"/mnt/c/Program Files/Docker/Docker/resources/bin/docker\" images python:3.12-slim-bookworm --format \"{{.Repository}}:{{.Tag}} {{.Size}}\")",
+      "Bash(\"/mnt/c/Program Files/Docker/Docker/resources/bin/docker\" images --format \"{{.Repository}}:{{.Tag}}\")",
+      "Bash(rm -f lightrag-edp-offline-dev.tar.gz)",
+      "Bash(tar -czf lightrag-edp-offline-dev.tar.gz --exclude=lightrag-edp/fixed-pkg/tmp --exclude=__pycache__ '--exclude=*.pyc' --exclude=lightrag-edp-offline-dev.tar.gz lightrag-edp)",
+      "Bash(sudo -S tar -czf lightrag-edp-offline-dev.tar.gz --exclude=lightrag-edp/fixed-pkg/tmp --exclude=__pycache__ '--exclude=*.pyc' --exclude=lightrag-edp-offline-dev.tar.gz lightrag-edp)",
+      "Bash(\"/mnt/c/Program Files/Docker/Docker/resources/bin/docker\" compose -f /home/chenhs/rag/lightrag-edp/fixed-pkg/docker-compose.deploy.yml up -d)",
+      "Bash(sudo -S chown chenhs:chenhs /home/chenhs/rag/lightrag-edp-offline-dev.tar.gz)",
+      "Bash(tar -tzf /home/chenhs/rag/lightrag-edp-offline-dev.tar.gz)",
+      "Bash(grep -E \"^lightrag-edp/[^/]+$\")",
+      "Bash(grep -c \"images/.*\\\\.tar$\")",
+      "Bash(\"/mnt/c/Program Files/Docker/Docker/resources/bin/docker\" compose -f /home/chenhs/rag/lightrag-edp/fixed-pkg/docker-compose.deploy.yml ps --format \"table {{.Name}}\\\\t{{.Status}}\")",
+      "Bash(curl -s -o /dev/null -w \"Health: %{http_code}\\\\n\" http://localhost:9621/health)",
+      "Bash(curl -s -o /dev/null -w \"WebUI: %{http_code}\\\\n\" http://localhost:9621/webui)",
+      "Bash(timeout 120 \"/mnt/c/Program Files/Docker/Docker/resources/bin/docker\" pull docker.m.daocloud.io/library/python:3.12-slim-bookworm)",
+      "Bash('/mnt/c/Program Files/Docker/Docker/resources/bin/docker' tag docker.m.daocloud.io/library/python:3.12-slim-bookworm python:3.12-slim-bookworm)",
+      "Bash(mkdir -p /home/chenhs/rag/lightrag-edp/fixed-pkg/build-images)",
+      "Bash('/mnt/c/Program Files/Docker/Docker/resources/bin/docker' save python:3.12-slim-bookworm -o /home/chenhs/rag/lightrag-edp/fixed-pkg/build-images/python_3.12-slim-bookworm.tar)",
+      "Bash('/mnt/c/Program Files/Docker/Docker/resources/bin/docker' save node:20-alpine -o /home/chenhs/rag/lightrag-edp/fixed-pkg/build-images/node_20-alpine.tar)",
+      "Bash(tar -czf /home/chenhs/rag/lightrag-edp-build-images.tar.gz -C /home/chenhs/rag/lightrag-edp/fixed-pkg build-images)",
+      "Bash(\"/mnt/c/Program Files/Docker/Docker/resources/bin/docker\" exec lightrag-edp python -c \"import rdflib; print\\('rdflib', rdflib.__version__\\)\")",
+      "Bash(cd /home/chenhs/rag/lightrag-edp/fixed-pkg echo \"=== 图谱持久化文件 ===\")",
+      "Bash(ls data/rag_storage/*.graphml)",
+      "Bash(\"/mnt/c/Program Files/Docker/Docker/resources/bin/docker\" compose -f /home/chenhs/rag/lightrag-edp/fixed-pkg/docker-compose.deploy.yml stop)",
+      "Bash(sudo -S tar -czf lightrag-edp-complete.tar.gz --exclude=lightrag-edp/fixed-pkg/tmp --exclude=__pycache__ '--exclude=*.pyc' --exclude=lightrag-edp-complete.tar.gz lightrag-edp)"
+    ]
+  }
+}

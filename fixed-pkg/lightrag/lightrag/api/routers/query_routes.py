@@ -103,6 +103,11 @@ class QueryRequest(BaseModel):
         description="If True, includes actual chunk text content in references. Only applies when include_references=True. Useful for evaluation and debugging.",
     )
 
+    include_embedding_text: Optional[bool] = Field(
+        default=False,
+        description="If True, includes the embedding_text field in each chunk of /query/data response. Default is False.",
+    )
+
     metadata_filter: Optional[Union[dict, str]] = Field(
         default=None,
         description="EDP metadata filter. JSON dict: {\"knowledge_type\": \"网电对抗态势\"} or {\"field\": [\"v1\",\"v2\"]}. String also accepted for backward compat. Soft fallback when empty.",
@@ -142,7 +147,8 @@ class QueryRequest(BaseModel):
         # Use Pydantic's `.model_dump(exclude_none=True)` to remove None values automatically
         # Exclude API-level parameters that don't belong in QueryParam
         request_data = self.model_dump(
-            exclude_none=True, exclude={"query", "include_chunk_content"}
+            exclude_none=True,
+            exclude={"query", "include_chunk_content", "include_embedding_text"},
         )
 
         # Ensure `mode` and `stream` are set explicitly
@@ -1164,6 +1170,26 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
         try:
             param = request.to_query_params(False)  # No streaming for data endpoint
             response = await rag.aquery_data(request.query, param=param)
+
+            # If requested, hydrate chunks with the stored embedding_text field
+            # (enriched retrieval text) from the text_chunks KV store.
+            if request.include_embedding_text and isinstance(response, dict):
+                data = response.get("data", {})
+                chunks = data.get("chunks", [])
+                chunk_ids = [
+                    c.get("chunk_id") for c in chunks if c.get("chunk_id")
+                ]
+                if chunk_ids:
+                    stored_list = await rag.text_chunks.get_by_ids(chunk_ids)
+                    by_id = {
+                        rec.get("_id"): rec
+                        for rec in stored_list
+                        if rec is not None
+                    }
+                    for c in chunks:
+                        rec = by_id.get(c.get("chunk_id"))
+                        if rec:
+                            c["embedding_text"] = rec.get("embedding_text", "")
 
             # aquery_data returns the new format with status, message, data, and metadata
             if isinstance(response, dict):
