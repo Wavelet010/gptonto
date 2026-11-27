@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios'
-import { ontologyGraphMode, ontologyGraphRequest, ontologyPost } from '@/lib/ontologyGraph'
+import { ontologyGraphMode, ontologyGraphRequest, ontologyPost, ontologyUpload } from '@/lib/ontologyGraph'
 import { backendBaseUrl, popularLabelsDefaultLimit, searchLabelsDefaultLimit } from '@/lib/constants'
 import { errorMessage } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
@@ -927,7 +927,7 @@ export const uploadDocument = async (
     const strategies:Record<string,string>={fixed_token:'F',recursive_character:'R',semantic_vector:'V',paragraph_semantic:'P',structure_aware:'S',numbered_heading:'H'}
     formData.append('options',JSON.stringify({strategy:strategies[config.strategy]||'H',chunk_params:config.params,...ontologyOptions}))
     if(previewId)formData.append('preview_id',previewId)
-    const data=await ontologyGraphRequest<{id:string}>('documents',{}, {method:'POST',body:formData})
+    const data=await ontologyUpload<{id:string}>('documents',formData,onUploadProgress)
     onUploadProgress?.(100)
     return {status:'success',message:'Queued',track_id:data.id}
   }

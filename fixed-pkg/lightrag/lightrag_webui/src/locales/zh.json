@@ -523,6 +523,8 @@
     "lastPage": "末页"
   },
   "gptonto": {
+    "normalized": "规范化文本块（无法可靠定位原文绝对位置）",
+    "loadFullDocument": "加载全文证据及原始解析资产",
     "ontologies": "本体管理",
     "prompts": "提示词管理",
     "enabled": "启用",

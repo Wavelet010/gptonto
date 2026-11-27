@@ -365,3 +365,15 @@ def test_multimodal_evidence_not_original():
     assert view["evidence_kind"]=="multimodal_analysis"
     assert view["matches"]==[{"chunk_start":0,"chunk_end":2}]
     assert view["sidecar"]["id"]=="x"
+
+
+
+def test_normalized_and_repeated_evidence_positions():
+    from lightrag.ontology.evidence import locate_chunks,evidence_view
+    text="设备  A。\n设备  A。"
+    exact,normalized=locate_chunks(text,[{"content":"设备  A。"},{"content":"设备 A。"}])
+    assert "_source_span" not in exact
+    assert exact["evidence_kind"]=="parsed_text"
+    assert normalized["evidence_kind"]=="normalized_chunk"
+    row={"id":"c","ord":0,"doc_id":"d","filename":"a.txt","data":normalized}
+    assert evidence_view(row,"设备")["matches"]==[{"chunk_start":0,"chunk_end":2}]

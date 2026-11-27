@@ -523,6 +523,8 @@
     "lastPage": "Last Page"
   },
   "gptonto": {
+    "normalized": "Normalized chunk (absolute source position unavailable)",
+    "loadFullDocument": "Load full document evidence and assets",
     "ontologies": "Ontologies",
     "prompts": "Prompts",
     "enabled": "Enabled",
