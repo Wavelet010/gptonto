@@ -125,11 +125,11 @@ def create_app():
                     store.save_prepared_chunks(did,chunks)
                 if not chunks: raise ValueError("No usable chunks")
                 progress(did,"EXTRACTING",0,len(chunks))
-                records = await extract_chunks(chunks,doc["snapshot"],llm,
+                records = await extract_chunks(chunks,doc["snapshot"],fresh_llm if retry_mode else llm,
                     concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")),
                     progress=lambda done,total:progress(did,"EXTRACTING",done,total))
                 if doc["options"].get("cross_chunk",True):
-                    records = await complete_relationships(did,records,doc["snapshot"],llm,
+                    records = await complete_relationships(did,records,doc["snapshot"],fresh_llm if retry_mode else llm,
                         concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")),
                         progress=lambda done,total:progress(did,"CROSS_CHUNK",done,total))
                 records=validate_document_assertions(did,records,doc["snapshot"])

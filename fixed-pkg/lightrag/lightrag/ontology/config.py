@@ -35,8 +35,8 @@ def resolve_options(filename,options,explicit):
         if directives:
             params.update(directives.chunk_params.get(strategy,{}))
         params.update(out.get("chunk_params",{}))
-        size=params.pop("chunk_token_size",os.getenv("CHUNK_SIZE",out["size"]))
-        overlap=params.pop("chunk_overlap_token_size",0 if strategy=="S" else os.getenv("CHUNK_OVERLAP_SIZE",out["overlap"]))
+        size=params.pop("chunk_token_size",os.getenv("CHUNK_SIZE",1200))
+        overlap=params.pop("chunk_overlap_token_size",0 if strategy=="S" else os.getenv("CHUNK_OVERLAP_SIZE",100))
         if "size" not in explicit: out["size"]=int(size)
         if "overlap" not in explicit: out["overlap"]=int(overlap)
         if strategy=="S":

@@ -23,7 +23,7 @@ async def complete_relationships(doc_id, records, profiles, llm, concurrency=4, 
     for i, rec in enumerate(result):
         rec["cross_relationships"],rec["cross_errors"] = [],[]
         rec["status"] = ("ROUTING_FAILED" if rec.get("errors") else
-                         "PARTIAL" if any(e.get("errors") for e in rec["extractions"]) else
+                         "PARTIAL" if rec.get("assertion_errors") or any(e.get("errors") for e in rec["extractions"]) else
                          "COMPLETED" if rec["extractions"] else "NO_MATCH")
         for ex in rec["extractions"]:
             profile = by_id[ex["profile_id"]]
