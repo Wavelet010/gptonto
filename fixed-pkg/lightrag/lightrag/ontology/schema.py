@@ -98,12 +98,15 @@ def validate(raw, schema, text):
     def evidence(record):
         value = record.get("evidence")
         return isinstance(value, str) and bool(value.strip()) and value in text
+    from collections import Counter
+    counts = Counter(e["local_id"] for e in raw["entities"]
+                     if isinstance(e, dict) and isinstance(e.get("local_id"), str))
     by_id = {}
     for e in raw["entities"]:
         if not isinstance(e, dict):
             errors.append("Invalid entity record"); continue
         eid, cls, name = e.get("local_id"), e.get("class_uri"), e.get("name")
-        if not all(isinstance(x, str) and x.strip() for x in (eid, cls, name)) or eid in by_id or cls not in schema["classes"] or not evidence(e):
+        if not all(isinstance(x, str) and x.strip() for x in (eid, cls, name)) or counts[eid] != 1 or cls not in schema["classes"] or not evidence(e):
             errors.append(f"Invalid entity: {eid}"); continue
         attrs = []
         values = e.get("attributes", [])

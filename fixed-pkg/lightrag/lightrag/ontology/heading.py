@@ -7,7 +7,7 @@ PATTERNS = [
     ("chinese", re.compile(r"^["+CN+r"]+[、.．。]\s*(\S.*)$"), 1),
     ("bracket_cn", re.compile(r"^[（(]["+CN+r"]+[）)]\s*(\S.*)$"), 2),
     ("bracket_num", re.compile(r"^(?:[（(]\d+[）)]|\d+[）)])\s*(\S.*)$"), 3),
-    ("number", re.compile(r"^(\d+(?:[.．]\d+)*)(?:[.．、。]\s*|\s+)(?!\d)(\S.*)$"), None),
+    ("number", re.compile(r"^(\d+(?:[.．]\d+)*)(?:[.．、。]\s*|\s+)(?![\d.．])(\S.*)$"), None),
     ("markdown", re.compile(r"^(#{1,6})\s+(\S.*)$"), None),
 ]
 
@@ -23,19 +23,36 @@ def heading_chunks(tokenizer, content, size, *, depth=1, formats=None, number_ba
         if len(line) > 80 or re.search(r"[。！？；;]$", line) or re.match(r"^(?:\d{4}[-/年]|\d+\.\d+\.\d+\.\d+|图\s*\d|表\s*\d)", line):
             return None
         numbered = re.sub(r"^#{1,6}\s*", "", line)
+        # Reject numeric measurements, dates and common list rows; Markdown style
+        # remains an explicit heading signal where the author supplied one.
+        if not line.startswith("#") and re.match(r"^\d+(?:[.．]\d+)?\s*(?:%|℃|°|ms\b|kg\b|km\b|MHz\b|GHz\b|米|公斤|秒|年|月|日)", numbered, re.I):
+            return None
+        if re.search(r"[。！？；;]$", numbered) or re.match(r"^(?:图|表)\s*\d",numbered):
+            return None
         for tag, pattern, level in PATTERNS:
             m = pattern.match(line if tag == "markdown" else numbered)
             if not m or tag not in allowed:
                 continue
             if tag == "number":
+                # Plain "88 电量" is not a numbered heading. A single number needs punctuation.
+                if not re.match(r"^\d+(?:[.．]\d+)*[.．、。]", numbered) and not re.search(r"[.．]",m.group(1)):
+                    continue
                 level = base + len(re.split(r"[.．]", m.group(1))) - 1
             elif tag == "markdown":
                 level = len(m.group(1))
             return tag, level
         return None
     bounds, stack, offset = [(0, [], None, None)], [], 0
+    fence = None
     for line in content.splitlines(keepends=True):
-        found = match(line)
+        marker = re.match(r"^\s*(`{3,}|~{3,})",line)
+        if marker:
+            ch = marker.group(1)[0]
+            if fence is None: fence = ch
+            elif fence == ch: fence = None
+            offset += len(line)
+            continue
+        found = None if fence else match(line)
         if found and found[1] <= depth:
             tag, level = found
             while stack and stack[-1][0] >= level:

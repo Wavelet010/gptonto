@@ -60,11 +60,22 @@ def create_app():
                 base_url=os.getenv("LLM_BINDING_HOST"),api_key=os.getenv("LLM_BINDING_API_KEY"),
                 stream=False,timeout=int(os.getenv("GPTONTO_LLM_TIMEOUT","120")))
 
-    async def process(did):
+    async def process(did, retry_mode=None):
         async with document_semaphore:
             try:
                 doc = store.document(did)
                 store.status(did,"PROCESSING")
+                if retry_mode:
+                    previous, failed = store.retry_input(did)
+                    if previous:
+                        indices = list(range(len(previous))) if retry_mode == "all" else failed
+                        if not indices:
+                            store.status(did,"COMPLETED")
+                            return
+                        records = await extract_chunks([previous[i]["chunk"] for i in indices],
+                            doc["snapshot"],llm,concurrency=int(os.getenv("GPTONTO_LLM_CONCURRENCY","4")))
+                        store.commit_retry(did,previous,dict(zip(indices,records)),doc["snapshot"])
+                        return
                 chunks = await split_document(doc["filename"],doc["source"],did,doc["options"])
                 if not chunks: raise ValueError("No usable chunks")
                 records = await extract_chunks(chunks,doc["snapshot"],llm,
@@ -76,8 +87,8 @@ def create_app():
             except Exception as exc:
                 store.status(did,"FAILED",type(exc).__name__+": "+str(exc)[:300])
 
-    def enqueue(did):
-        task = asyncio.create_task(process(did))
+    def enqueue(did, retry_mode=None):
+        task = asyncio.create_task(process(did,retry_mode))
         tasks.add(task)
         task.add_done_callback(tasks.discard)
 
@@ -190,10 +201,10 @@ def create_app():
         return store.chunks(id)
 
     @api.post("/documents/{id}/retry",status_code=202)
-    async def retry(id:str):
+    async def retry(id:str, mode:Literal["failed","all"]="failed"):
         try: store.retry(id)
         except ValueError as exc: raise HTTPException(409,str(exc)) from exc
-        enqueue(id)
+        enqueue(id,mode)
         return {"id":id,"status":"QUEUED"}
 
     @api.delete("/documents/{id}")

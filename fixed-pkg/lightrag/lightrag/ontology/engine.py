@@ -10,7 +10,13 @@ def parse_json(raw):
     raw = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", raw)
     def reject_constant(value):
         raise ValueError("Non-finite JSON number")
-    return json.loads(raw, parse_constant=reject_constant)
+    def finite_float(value):
+        import math
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("Non-finite JSON number")
+        return number
+    return json.loads(raw, parse_constant=reject_constant, parse_float=finite_float)
 
 
 async def extract_chunks(chunks, profiles, llm, concurrency=4):
@@ -46,7 +52,9 @@ async def extract_chunks(chunks, profiles, llm, concurrency=4):
                     record["routes"].append({"id": pid, "reason": str(match.get("reason", ""))})
                     seen.add(pid)
         except Exception as exc:
+            record["routes"] = []
             record["errors"].append("Routing failed: " + type(exc).__name__)
+            record["status"] = "ROUTING_FAILED"
             return record
         async def extract(match):
             p = by_id[match["id"]]
@@ -61,6 +69,8 @@ async def extract_chunks(chunks, profiles, llm, concurrency=4):
                 result.update({"entities": [], "relationships": [], "errors": ["Extraction failed: " + type(exc).__name__]})
             return result
         record["extractions"] = await asyncio.gather(*(extract(m) for m in record["routes"]))
+        record["status"] = ("NO_MATCH" if not record["routes"] else
+                            "PARTIAL" if any(e["errors"] for e in record["extractions"]) else "COMPLETED")
         return record
     # Bound the number of live chunk coroutines as well as concurrent LLM calls.
     result = []

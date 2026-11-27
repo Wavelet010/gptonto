@@ -40,6 +40,10 @@ class Store:
                 id TEXT PRIMARY KEY, doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
                 ord INTEGER NOT NULL, data TEXT NOT NULL, result TEXT NOT NULL, UNIQUE(doc_id,ord)
             );
+            CREATE TABLE IF NOT EXISTS retry_diagnostics (
+                doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+                ord INTEGER NOT NULL, result TEXT NOT NULL, PRIMARY KEY(doc_id,ord)
+            );
             CREATE TABLE IF NOT EXISTS entities (
                 id TEXT PRIMARY KEY, class_uri TEXT NOT NULL, name TEXT NOT NULL
             );
@@ -171,11 +175,39 @@ class Store:
                 raise ValueError("Document missing or still processing")
             self._prune(db)
 
-    def commit(self, did, records, profiles):
+    @staticmethod
+    def has_errors(record):
+        return bool(record.get("errors")) or any(e.get("errors") for e in record.get("extractions", []))
+
+    def retry_input(self, did):
+        """Existing chunks are the canonical retry input, not a reparse with drifting boundaries."""
+        with self.connect() as db:
+            rows = list(db.execute("SELECT ord,result FROM chunks WHERE doc_id=? ORDER BY ord",(did,)))
+            diagnostics = {r["ord"] for r in db.execute("SELECT ord FROM retry_diagnostics WHERE doc_id=?",(did,))}
+            records = [json.loads(r["result"]) for r in rows]
+            failed = [i for i,r in enumerate(records) if self.has_errors(r) or i in diagnostics]
+            return records, failed
+
+    def commit_retry(self, did, previous, updates, profiles):
+        """Replace successful retries only; preserve previous assertions on failed retries."""
+        merged = list(previous)
+        diagnostics = {}
+        for i, record in updates.items():
+            if self.has_errors(record):
+                diagnostics[i] = record
+            else:
+                merged[i] = record
+        self.commit(did, merged, profiles, diagnostics=diagnostics)
+
+    def commit(self, did, records, profiles, diagnostics=None):
         """Replace one document atomically; stable identities use only configured key properties."""
         by_id = {p["id"]:p for p in profiles}
-        partial = False
+        diagnostics = diagnostics or {}
+        partial = bool(diagnostics)
         with self.connect() as db:
+            db.execute("DELETE FROM retry_diagnostics WHERE doc_id=?", (did,))
+            db.executemany("INSERT INTO retry_diagnostics VALUES(?,?,?)",
+                           [(did,i,dump(r)) for i,r in diagnostics.items()])
             db.execute("DELETE FROM chunks WHERE doc_id=?", (did,))
             for order, rec in enumerate(records):
                 cid = digest(did, order)
@@ -189,7 +221,7 @@ class Store:
                     for e in ex["entities"]:
                         cls = e["class_uri"]
                         key = keys.get(cls)
-                        vals = {dump(a["value"]) for a in e["attributes"] if a["property_uri"] == key}
+                        vals = {dump(a["value"]) for a in e["attributes"] if a["property_uri"] == key and str(a["value"]) in a["evidence"]}
                         # No name-only merging. With no explicit unique key, use chunk-local identity.
                         eid = digest(cls,key,next(iter(vals))) if key and len(vals)==1 else digest(cid,pid,e["local_id"])
                         mapping[e["local_id"]] = eid
@@ -205,18 +237,29 @@ class Store:
                         db.execute("INSERT OR IGNORE INTO relationships VALUES(?,?,?,?)",(rid,source,r["predicate_uri"],target))
                         db.execute("INSERT OR IGNORE INTO relation_sources VALUES(?,?,?,?)",(rid,cid,pid,r["evidence"]))
             self._prune(db)
-            db.execute("UPDATE documents SET status=?,error=NULL WHERE id=?",("PARTIAL" if partial else "COMPLETED",did))
+            all_failed = bool(records) and all(
+                r.get("errors") or (r.get("extractions") and all(
+                    e.get("errors") and not e.get("entities") for e in r["extractions"]))
+                for r in records)
+            state = "FAILED" if all_failed else "PARTIAL" if partial else "COMPLETED"
+            db.execute("UPDATE documents SET status=?,error=? WHERE id=?",
+                       (state,"All chunks failed; see extraction details" if all_failed else None,did))
 
     def chunks(self, did):
         with self.connect() as db:
-            return [{"id":r["id"], **json.loads(r["result"])} for r in db.execute(
-                "SELECT id,result FROM chunks WHERE doc_id=? ORDER BY ord",(did,))]
+            db.execute("BEGIN")
+            diagnostics = {r["ord"]:json.loads(r["result"]) for r in db.execute(
+                "SELECT ord,result FROM retry_diagnostics WHERE doc_id=?", (did,))}
+            return [{"id":r["id"], **json.loads(r["result"]),
+                     "last_retry":diagnostics.get(r["ord"])} for r in db.execute(
+                "SELECT id,ord,result FROM chunks WHERE doc_id=? ORDER BY ord",(did,))]
 
     def export(self, did=None):
         """Export valid instances only, with assertions and source provenance."""
         filt = " WHERE c.doc_id=?" if did else ""
         args = (did,) if did else ()
         with self.connect() as db:
+            db.execute("BEGIN")
             entities = {}
             for r in db.execute("""SELECT e.id,e.class_uri,s.name,s.evidence,s.chunk_id,s.profile_id,c.doc_id
                 FROM entity_sources s JOIN entities e ON e.id=s.entity_id JOIN chunks c ON c.id=s.chunk_id"""+filt,args):
